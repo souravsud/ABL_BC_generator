@@ -1,0 +1,445 @@
+import numpy as np
+from pathlib import Path
+from typing import Tuple
+from config import ABLConfig
+import os
+
+def calculate_graded_z_distribution(z_ground: float, z_top: float, n_cells: int, 
+                                  expansion_ratio: float, use_face_centers: bool = True) -> np.ndarray:
+    """
+    Calculate z-coordinates based on OpenFOAM simpleGrading (last_cell/first_cell ratio).
+    
+    Args:
+        z_ground: Bottom boundary z-coordinate
+        z_top: Top boundary z-coordinate  
+        n_cells: Number of cells in z-direction
+        expansion_ratio: Expansion ratio (last_cell_height/first_cell_height)
+        use_face_centers: If True, return cell centers; if False, return internal faces
+        
+    Returns:
+        Array of z-coordinates
+    """
+    domain_height = z_top - z_ground
+    
+    if expansion_ratio == 1.0:
+        # Uniform spacing
+        z_faces = np.linspace(z_ground, z_top, n_cells + 1)
+    else:
+        # Calculate first cell height based on expansion ratio
+        # expansion_ratio = h_last / h_first
+        # For geometric progression: h_i = h_first * r^i, where r^(n-1) = expansion_ratio
+        r = expansion_ratio**(1.0/(n_cells - 1))  # Geometric ratio
+        h_first = domain_height * (r - 1) / (r**n_cells - 1)
+        
+        # Calculate face positions
+        z_faces = np.zeros(n_cells + 1)
+        z_faces[0] = z_ground
+        
+        for i in range(n_cells):
+            cell_height = h_first * (r**i)
+            z_faces[i + 1] = z_faces[i] + cell_height
+    
+    if use_face_centers:
+        # Return cell centers
+        return 0.5 * (z_faces[:-1] + z_faces[1:])
+    else:
+        # Return internal faces (excluding boundaries)
+        return z_faces[1:-1]
+
+
+def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_blocks = None, use_face_centers: bool = True) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Calculate U, k, epsilon profiles for inlet based on mesh grading
+    
+    Args:
+        config: ABL configuration object
+        use_face_centers: If True, use cell centers; if False, use internal faces
+        
+    Returns:
+        Tuple of (U_profiles, k_profiles, epsilon_profiles)
+    """
+    atm = config.atmospheric
+    turb = config.turbulence
+    mesh = config.mesh
+    
+    # Calculate z-coordinates based on mesh grading
+    z_coords = calculate_graded_z_distribution(
+        mesh.inlet_height,
+        mesh.domain_height,
+        mesh.num_cells_z,
+        mesh.expansion_ratio_R,
+        use_face_centers
+    )
+    
+    # Generate profiles for each block x each z-level
+    total_faces = len(inlet_blocks) * len(z_coords)
+    U_profiles = np.zeros((total_faces, 3))
+    k_profiles = np.zeros(total_faces)
+    epsilon_profiles = np.zeros(total_faces)
+
+
+    # Calculate friction velocity
+    u_star = (turb.kappa * atm.Uref) / np.log((atm.zref + atm.z0) / atm.z0)
+    
+    # Flow direction
+    flow_dir_rad = np.radians(atm.flow_dir_deg)
+    flow_dir_x = np.cos(flow_dir_rad)
+    flow_dir_y = np.sin(flow_dir_rad)
+    
+    
+    face_idx = 0
+    for block in inlet_blocks:
+        for i, z in enumerate(z_coords):
+            height = max(z - mesh.inlet_height, 0.01)
+            
+            # Velocity profile
+            if height <= atm.h_bl:
+                u_mag = (u_star / turb.kappa) * np.log(1.0 + height / atm.z0)
+            else:
+                u_mag = (u_star / turb.kappa) * np.log(1.0 + atm.h_bl / atm.z0)
+                
+            U_profiles[face_idx] = [u_mag * flow_dir_x, u_mag * flow_dir_y, 0.0]
+            
+            # TKE profile  
+            if height <= 0.99 * atm.h_bl:
+                ratio = min(height / atm.h_bl, 0.99)
+                k_profiles[face_idx] = (turb.Cmu**(-0.5)) * u_star**2 * (1.0 - ratio)**2
+            else:
+                k_profiles[face_idx] = (turb.Cmu**(-0.5)) * u_star**2 * (1.0 - 0.99)**2
+                
+            k_profiles[face_idx] = max(k_profiles[face_idx], 1e-6)
+            
+            # Epsilon profile
+            if height <= 0.95 * atm.h_bl:
+                denom = turb.kappa * (height + atm.z0)
+            else:
+                denom = turb.kappa * (0.95 * atm.h_bl + atm.z0)
+                
+            epsilon_profiles[face_idx] = (turb.Cmu**0.75) * (k_profiles[face_idx]**1.5) / max(denom, 1e-6)
+            epsilon_profiles[face_idx] = max(epsilon_profiles[face_idx], 1e-8)
+
+            face_idx += 1
+        
+    return U_profiles, k_profiles, epsilon_profiles
+
+
+def write_openfoam_data_files(case_dir: str, U_profiles: np.ndarray, k_profiles: np.ndarray, 
+                             epsilon_profiles: np.ndarray, config: ABLConfig):
+    """Write boundary condition data files for OpenFOAM"""
+    constant_dir = Path(case_dir) / 'constant'
+    constant_dir.mkdir(exist_ok=True)
+    
+    foam_header = f"""/*--------------------------------*- C++ -*----------------------------------*\\
+                    FoamFile
+                    {{
+                        version     {config.openfoam.version};
+                        format      ascii;
+                        class       CLASS_PLACEHOLDER;
+                        object      OBJECT_PLACEHOLDER;
+                    }}
+                    // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+                    """
+    
+    # Write velocity data
+    with open(constant_dir / 'inletU', 'w') as f:
+        header = foam_header.replace('CLASS_PLACEHOLDER', 'vectorField').replace('OBJECT_PLACEHOLDER', 'inletU')
+        #f.write(header)
+        f.write(f"{len(U_profiles)}\n(\n")
+        for u_vec in U_profiles:
+            f.write(f"({u_vec[0]:.6f} {u_vec[1]:.6f} {u_vec[2]:.6f})\n")
+        f.write(")\n\n// ************************************************************************* //\n")
+    
+    # Write k data
+    with open(constant_dir / 'inletK', 'w') as f:
+        header = foam_header.replace('CLASS_PLACEHOLDER', 'scalarField').replace('OBJECT_PLACEHOLDER', 'inletK')
+        #f.write(header)
+        f.write(f"{len(k_profiles)}\n(\n")
+        for k_val in k_profiles:
+            f.write(f"{k_val:.8f}\n")
+        f.write(")\n\n// ************************************************************************* //\n")
+    
+    # Write epsilon data  
+    with open(constant_dir / 'inletEpsilon', 'w') as f:
+        header = foam_header.replace('CLASS_PLACEHOLDER', 'scalarField').replace('OBJECT_PLACEHOLDER', 'inletEpsilon')
+        #f.write(header)
+        f.write(f"{len(epsilon_profiles)}\n(\n")
+        for eps_val in epsilon_profiles:
+            f.write(f"{eps_val:.10f}\n")
+        f.write(")\n\n// ************************************************************************* //\n")
+
+
+def generate_boundary_condition_files(case_dir: str, config: ABLConfig):
+    """Generate boundary condition files that read from data files"""
+    zero_dir = Path(case_dir) / '0'
+    zero_dir.mkdir(exist_ok=True)
+    
+    patches = config.mesh.patch_names
+    foam_version = config.openfoam.foam_version
+    
+    # U boundary condition file
+    u_content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
+| =========                 |                                                 |
+| \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\\\    /   O peration     | Version:  {foam_version}                                 |
+|   \\\\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\\\/     M anipulation  |                                                 |
+\\*---------------------------------------------------------------------------*/
+FoamFile
+{{
+    version     {config.openfoam.version};
+    format      ascii;
+    class       volVectorField;
+    object      U;
+}}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 1 -1 0 0 0 0];
+
+internalField   uniform (0 0 0);
+
+boundaryField
+{{
+    {patches['inlet']}
+    {{
+        type            fixedValue;
+        value           nonuniform List<vector> 
+        #include        "../constant/inletU"
+        ;
+    }}
+    
+    {patches['outlet']}
+    {{
+        type            {config.openfoam.boundary_conditions['U']['outlet']['type']};
+    }}
+    
+    {patches['ground']}
+    {{
+        type             {config.openfoam.boundary_conditions['U']['ground']['type']};
+    }}
+    
+    {patches['sky']}
+    {{
+        type             {config.openfoam.boundary_conditions['U']['sky']['type']};
+    }}
+    
+    {patches['sides']}
+    {{
+        type             {config.openfoam.boundary_conditions['U']['sides']['type']};
+    }}
+    
+    "proc.*"
+    {{
+        type            processor;
+    }}
+}}
+
+// ************************************************************************* //
+"""
+    
+    # k boundary condition file
+    k_content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
+| =========                 |                                                 |
+| \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\\\    /   O peration     | Version:  {foam_version}                                 |
+|   \\\\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\\\/     M anipulation  |                                                 |
+\\*---------------------------------------------------------------------------*/
+FoamFile
+{{
+    version     {config.openfoam.version};
+    format      ascii;
+    class       volScalarField;
+    object      k;
+}}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 2 -2 0 0 0 0];
+
+internalField   uniform {config.openfoam.initial_k};
+
+boundaryField
+{{
+    {patches['inlet']}
+    {{
+        type            fixedValue;
+        value           nonuniform List<scalar> 
+        #include        "../constant/inletK"
+        ;
+    }}
+    
+    {patches['outlet']}
+    {{
+        type            {config.openfoam.boundary_conditions['k']['outlet']['type']};
+    }}
+    
+    {patches['ground']}
+    {{
+        type            {config.openfoam.wall_functions['ground_k']['type']};
+        value           uniform {config.openfoam.wall_functions['ground_k']['value']};
+    }}
+    
+    {patches['sky']}
+    {{
+        type            {config.openfoam.boundary_conditions['k']['sky']['type']};
+    }}
+    
+    {patches['sides']}
+    {{
+        type            {config.openfoam.boundary_conditions['k']['sides']['type']};
+    }}
+    
+    "proc.*"
+    {{
+        type            processor;
+    }}
+}}
+
+// ************************************************************************* //
+"""
+
+    # epsilon boundary condition file
+    eps_wall = config.openfoam.wall_functions['ground_epsilon']
+    epsilon_content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
+| =========                 |                                                 |
+| \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\\\    /   O peration     | Version:  {foam_version}                                 |
+|   \\\\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\\\/     M anipulation  |                                                 |
+\\*---------------------------------------------------------------------------*/
+FoamFile
+{{
+    version     {config.openfoam.version};
+    format      ascii;
+    class       volScalarField;
+    object      epsilon;
+}}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 2 -3 0 0 0 0];
+
+internalField   uniform {config.openfoam.initial_epsilon};
+
+boundaryField
+{{
+    {patches['inlet']}
+    {{
+        type            fixedValue;
+        value           nonuniform List<scalar> 
+        #include        "../constant/inletEpsilon"
+        ;
+    }}
+    
+    {patches['outlet']}
+    {{
+        type            {config.openfoam.boundary_conditions['epsilon']['outlet']['type']};
+    }}
+    
+    {patches['ground']}
+    {{
+        type            {eps_wall['type']};
+        Cmu             {eps_wall['Cmu']};
+        kappa           {eps_wall['kappa']};
+        E               {eps_wall['E']};
+        value           uniform {eps_wall['value']};
+    }}
+    
+    {patches['sky']}
+    {{
+        type            {config.openfoam.boundary_conditions['epsilon']['sky']['type']};
+    }}
+    
+    {patches['sides']}
+    {{
+        type            {config.openfoam.boundary_conditions['epsilon']['sides']['type']};
+    }}
+    
+    "proc.*"
+    {{
+        type            processor;
+    }}
+}}
+
+// ************************************************************************* //
+"""
+    
+    # Write the files
+    with open(zero_dir / 'U', 'w') as f:
+        f.write(u_content)
+        
+    with open(zero_dir / 'k', 'w') as f:
+        f.write(k_content)
+        
+    with open(zero_dir / 'epsilon', 'w') as f:
+        f.write(epsilon_content)
+
+
+def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None, use_face_centers: bool = True):
+    """
+    Complete workflow for mesh-based ABL inlet data generation
+    
+    Args:
+        case_dir: OpenFOAM case directory path
+        config: ABL configuration (uses defaults if None)
+        use_face_centers: If True, use cell centers; if False, use internal faces
+    """
+    if config is None:
+        config = ABLConfig()
+    
+    # Read inlet blocks from saved file
+    inlet_file = os.path.join(case_dir, "0/include/inletFaceInfo.txt")
+    inlet_blocks = read_inlet_face_file(inlet_file)
+
+    # Calculate profiles based on mesh grading
+    U_profiles, k_profiles, epsilon_profiles = calculate_inlet_profiles_from_mesh(config, inlet_blocks, use_face_centers)
+    
+    # Write data files
+    write_openfoam_data_files(case_dir, U_profiles, k_profiles, epsilon_profiles, config)
+    
+    # Generate boundary condition files
+    generate_boundary_condition_files(case_dir, config)
+    
+    return {
+        'U_profiles': U_profiles,
+        'k_profiles': k_profiles,
+        'epsilon_profiles': epsilon_profiles,
+        'config': config
+    }
+
+def read_inlet_face_file(file_path):
+    """Read inlet face information from blockMesh generator"""
+    inlet_blocks = []
+    
+    with open(file_path, 'r') as f:
+        for line in f:
+            if line.startswith('#'):
+                continue
+            parts = line.strip().split(',')
+            if len(parts) == 5:
+                inlet_blocks.append({
+                    'block_i': int(parts[0]),
+                    'block_j': int(parts[1]), 
+                    'x_ground': float(parts[2]),
+                    'y_ground': float(parts[3]),
+                    'z_ground': float(parts[4])
+                })
+    
+    return inlet_blocks
+
+# Example usage
+if __name__ == "__main__":
+    
+    # Simple usage with defaults
+    config = ABLConfig()
+    config.mesh.inlet_height = 0.0
+    config.mesh.domain_height = 4000.0
+    config.mesh.num_cells_z = 50
+    config.mesh.expansion_ratio_R = 100.0
+    
+    case_dir = "/home/ssudhakaran/sourav_files/6_OpenFOAM/meshStructured"
+    
+    # Generate using cell centers (default)
+    results = generate_inlet_data_workflow(case_dir, config, use_face_centers=True)
+    
+    # Or generate using internal faces
+    # results = generate_inlet_data_workflow(case_dir, config, use_face_centers=False)
