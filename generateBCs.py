@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Tuple
 from config import ABLConfig
 import os
+import matplotlib.pyplot as plt
 
 def calculate_graded_z_distribution(z_ground: float, z_top: float, n_cells: int, 
                                   expansion_ratio: float, use_face_centers: bool = True) -> np.ndarray:
@@ -374,7 +375,8 @@ boundaryField
         f.write(epsilon_content)
 
 
-def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None, use_face_centers: bool = True):
+def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None, 
+                               use_face_centers: bool = True, plot_profiles: bool = True):
     """
     Complete workflow for mesh-based ABL inlet data generation
     
@@ -382,6 +384,7 @@ def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None, use_fa
         case_dir: OpenFOAM case directory path
         config: ABL configuration (uses defaults if None)
         use_face_centers: If True, use cell centers; if False, use internal faces
+        plot_profiles: If True, display verification plots
     """
     if config is None:
         config = ABLConfig()
@@ -390,8 +393,18 @@ def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None, use_fa
     inlet_file = os.path.join(case_dir, "0/include/inletFaceInfo.txt")
     inlet_blocks = read_inlet_face_file(inlet_file)
 
+    # Calculate z-coordinates based on mesh grading
+    z_coords = calculate_graded_z_distribution(
+        config.mesh.inlet_height,
+        config.mesh.domain_height,
+        config.mesh.num_cells_z,
+        config.mesh.expansion_ratio_R,
+        use_face_centers
+    )
+
     # Calculate profiles based on mesh grading
-    U_profiles, k_profiles, epsilon_profiles = calculate_inlet_profiles_from_mesh(config, inlet_blocks, use_face_centers)
+    U_profiles, k_profiles, epsilon_profiles = calculate_inlet_profiles_from_mesh(
+        config, inlet_blocks, use_face_centers)
     
     # Write data files
     write_openfoam_data_files(case_dir, U_profiles, k_profiles, epsilon_profiles, config)
@@ -399,10 +412,16 @@ def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None, use_fa
     # Generate boundary condition files
     generate_boundary_condition_files(case_dir, config)
     
+    # Optional plotting
+    if plot_profiles:
+        plot_inlet_profiles(z_coords, U_profiles, k_profiles, epsilon_profiles, 
+                          config, save_dir=case_dir)
+    
     return {
         'U_profiles': U_profiles,
         'k_profiles': k_profiles,
         'epsilon_profiles': epsilon_profiles,
+        'z_coords': z_coords,
         'config': config
     }
 
@@ -426,6 +445,75 @@ def read_inlet_face_file(file_path):
     
     return inlet_blocks
 
+def plot_inlet_profiles(z_coords: np.ndarray, U_profiles: np.ndarray, 
+                    k_profiles: np.ndarray, epsilon_profiles: np.ndarray,
+                    config, save_dir: str = None):
+    """
+    Plot ABL inlet profiles for verification
+    
+    Args:
+        z_coords: Height coordinates
+        U_profiles: Velocity profiles [n_faces, 3]
+        k_profiles: TKE profiles [n_faces]  
+        epsilon_profiles: Dissipation profiles [n_faces]
+        config: ABL configuration
+        save_dir: Directory to save plots (optional)
+    """
+    
+    # Calculate velocity magnitude for first inlet block (representative)
+    n_z = len(z_coords)
+    u_mag = np.linalg.norm(U_profiles[:n_z], axis=1)  # First n_z faces
+    k_vals = k_profiles[:n_z]  # First n_z faces
+    eps_vals = epsilon_profiles[:n_z]  # First n_z faces
+    
+    # Create subplots
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 6))
+    
+    # Plot velocity magnitude
+    ax1.plot(u_mag, z_coords, 'b-', linewidth=2, label='Velocity magnitude')
+    ax1.set_xlabel('Velocity magnitude [m/s]')
+    ax1.set_ylabel('Height [m]')
+    ax1.set_title('Velocity Profile')
+    ax1.grid(True, alpha=0.3)
+    ax1.legend()
+    
+    # Add reference lines
+    if hasattr(config.atmospheric, 'h_bl'):
+        ax1.axhline(y=config.atmospheric.h_bl, color='r', linestyle='--', 
+                alpha=0.7, label=f'BL height ({config.atmospheric.h_bl}m)')
+    
+    # Plot TKE
+    ax2.plot(k_vals, z_coords, 'g-', linewidth=2, label='TKE')
+    ax2.set_xlabel('TKE [m²/s²]')
+    ax2.set_ylabel('Height [m]')
+    ax2.set_title('Turbulent Kinetic Energy')
+    ax2.grid(True, alpha=0.3)
+    ax2.legend()
+    
+    if hasattr(config.atmospheric, 'h_bl'):
+        ax2.axhline(y=config.atmospheric.h_bl, color='r', linestyle='--', 
+                alpha=0.7, label=f'BL height ({config.atmospheric.h_bl}m)')
+    
+    # Plot epsilon
+    ax3.plot(eps_vals, z_coords, 'r-', linewidth=2, label='Epsilon')
+    ax3.set_xlabel('Epsilon [m²/s³]')
+    ax3.set_ylabel('Height [m]')
+    ax3.set_title('Turbulent Dissipation Rate')
+    ax3.grid(True, alpha=0.3)
+    ax3.legend()
+    
+    if hasattr(config.atmospheric, 'h_bl'):
+        ax3.axhline(y=config.atmospheric.h_bl, color='r', linestyle='--', 
+                alpha=0.7, label=f'BL height ({config.atmospheric.h_bl}m)')
+    
+    plt.tight_layout()
+    
+    # Save if directory provided
+    if save_dir:
+        save_path = Path(save_dir) / 'inlet_profiles.png'
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Plot saved to: {save_path}")
+    
 # Example usage
 if __name__ == "__main__":
     
