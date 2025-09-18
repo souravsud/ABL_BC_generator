@@ -5,8 +5,7 @@ from typing import Dict
 @dataclass
 class AtmosphericConfig:
     """Atmospheric boundary layer parameters"""
-    Uref: float = 6.87          # Reference wind speed (m/s)
-    zref: float = 100.0         # Reference height (m)
+    u_star: float = 0.40          # friction velocity
     z0: float = 0.1             # Surface roughness (m)
     h_bl: float = 1500.0        # Boundary layer height (m)
     flow_dir_deg: float = 45.0  # Flow direction (degrees from x-axis)
@@ -22,10 +21,10 @@ class TurbulenceConfig:
 @dataclass
 class MeshConfig:
     """Mesh and boundary configuration"""
-    inlet_height: float = 0.0           # Fixed flat inlet height above reference (m)
+    inlet_height: float = 223.603012           # Fixed flat inlet height above reference (m)
     domain_height: float = 4000.0       # Sky/top boundary height (m)
-    num_cells_z: int = 20               # Number of vertical cells
-    expansion_ratio_R: float = 20.0     # Vertical grading expansion ratio
+    num_cells_z: int = 50               # Number of vertical cells
+    expansion_ratio_R: float = 100     # Vertical grading expansion ratio
     patch_names: Dict[str, str] = None
     
     def __post_init__(self):
@@ -44,8 +43,6 @@ class OpenFOAMConfig:
     """OpenFOAM file generation settings"""
     version: str = "2.0"
     foam_version: str = "v12"
-    initial_k: float = 0.88
-    initial_epsilon: float = 0.0016
     wall_functions: Dict[str, Dict] = None
     boundary_conditions: Dict[str, Dict[str, Dict]] = None  # NEW
     
@@ -62,7 +59,7 @@ class OpenFOAMConfig:
                 }
             }
         
-        # NEW: Default boundary conditions
+        # Default boundary conditions
         if self.boundary_conditions is None:
             self.boundary_conditions = {
                 'U': {

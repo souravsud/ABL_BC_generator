@@ -77,10 +77,6 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_blocks = None, u
     U_profiles = np.zeros((total_faces, 3))
     k_profiles = np.zeros(total_faces)
     epsilon_profiles = np.zeros(total_faces)
-
-
-    # Calculate friction velocity
-    u_star = (turb.kappa * atm.Uref) / np.log((atm.zref + atm.z0) / atm.z0)
     
     # Flow direction
     flow_dir_rad = np.radians(atm.flow_dir_deg)
@@ -95,18 +91,18 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_blocks = None, u
             
             # Velocity profile
             if height <= atm.h_bl:
-                u_mag = (u_star / turb.kappa) * np.log(1.0 + height / atm.z0)
+                u_mag = (atm.u_star / turb.kappa) * np.log(1.0 + height / atm.z0)
             else:
-                u_mag = (u_star / turb.kappa) * np.log(1.0 + atm.h_bl / atm.z0)
+                u_mag = (atm.u_star / turb.kappa) * np.log(1.0 + atm.h_bl / atm.z0)
                 
             U_profiles[face_idx] = [u_mag * flow_dir_x, u_mag * flow_dir_y, 0.0]
             
             # TKE profile  
             if height <= 0.99 * atm.h_bl:
                 ratio = min(height / atm.h_bl, 0.99)
-                k_profiles[face_idx] = (turb.Cmu**(-0.5)) * u_star**2 * (1.0 - ratio)**2
+                k_profiles[face_idx] = (turb.Cmu**(-0.5)) * atm.u_star**2 * (1.0 - ratio)**2
             else:
-                k_profiles[face_idx] = (turb.Cmu**(-0.5)) * u_star**2 * (1.0 - 0.99)**2
+                k_profiles[face_idx] = (turb.Cmu**(-0.5)) * atm.u_star**2 * (1.0 - 0.99)**2
                 
             k_profiles[face_idx] = max(k_profiles[face_idx], 1e-6)
             
@@ -170,7 +166,7 @@ def write_openfoam_data_files(case_dir: str, U_profiles: np.ndarray, k_profiles:
         f.write(")\n\n// ************************************************************************* //\n")
 
 
-def generate_boundary_condition_files(case_dir: str, config: ABLConfig):
+def generate_boundary_condition_files(case_dir: str, config: ABLConfig, initial_vals):
     """Generate boundary condition files that read from data files"""
     zero_dir = Path(case_dir) / '0'
     zero_dir.mkdir(exist_ok=True)
@@ -197,7 +193,7 @@ FoamFile
 
 dimensions      [0 1 -1 0 0 0 0];
 
-internalField   uniform (0 0 0);
+internalField   uniform ({initial_vals['flowVelocity'][0]:.3f} {initial_vals['flowVelocity'][1]:.3f} {initial_vals['flowVelocity'][2]:.3f});
 
 boundaryField
 {{
@@ -257,7 +253,7 @@ FoamFile
 
 dimensions      [0 2 -2 0 0 0 0];
 
-internalField   uniform {config.openfoam.initial_k};
+internalField   uniform {initial_vals['turbulentKE']:.6f};
 
 boundaryField
 {{
@@ -319,7 +315,7 @@ FoamFile
 
 dimensions      [0 2 -3 0 0 0 0];
 
-internalField   uniform {config.openfoam.initial_epsilon};
+internalField   uniform {initial_vals['turbulentEpsilon']:.8f};
 
 boundaryField
 {{
@@ -379,15 +375,13 @@ def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None,
                                use_face_centers: bool = True, plot_profiles: bool = True):
     """
     Complete workflow for mesh-based ABL inlet data generation
-    
-    Args:
-        case_dir: OpenFOAM case directory path
-        config: ABL configuration (uses defaults if None)
-        use_face_centers: If True, use cell centers; if False, use internal faces
-        plot_profiles: If True, display verification plots
     """
     if config is None:
         config = ABLConfig()
+    
+    # Add the missing Ustar attribute if not present
+    if not hasattr(config.atmospheric, 'u_star'):
+        config.atmospheric.u_star = 0.40  # Use your reference solver value
     
     # Read inlet blocks from saved file
     inlet_file = os.path.join(case_dir, "0/include/inletFaceInfo.txt")
@@ -402,6 +396,8 @@ def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None,
         use_face_centers
     )
 
+    initial_vals = calculate_initial_conditions(config)
+
     # Calculate profiles based on mesh grading
     U_profiles, k_profiles, epsilon_profiles = calculate_inlet_profiles_from_mesh(
         config, inlet_blocks, use_face_centers)
@@ -410,7 +406,10 @@ def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None,
     write_openfoam_data_files(case_dir, U_profiles, k_profiles, epsilon_profiles, config)
     
     # Generate boundary condition files
-    generate_boundary_condition_files(case_dir, config)
+    generate_boundary_condition_files(case_dir, config, initial_vals)
+    
+    # Generate initial conditions file  # <-- NEW
+    write_initial_conditions_file(case_dir, config, initial_vals)  # <-- NEW
     
     # Optional plotting
     if plot_profiles:
@@ -444,6 +443,88 @@ def read_inlet_face_file(file_path):
                 })
     
     return inlet_blocks
+
+def calculate_initial_conditions(config: ABLConfig, use_face_centers: bool = True) -> dict:
+    """
+    Calculate representative initial condition values based on inlet profile equations
+    
+    Args:
+        config: ABL configuration object
+        use_face_centers: If True, use cell centers; if False, use internal faces
+        
+    Returns:
+        Dictionary with flowVelocity, turbulentKE, turbulentEpsilon values
+    """
+    atm = config.atmospheric
+    turb = config.turbulence
+    
+    zref = 500
+    # Use reference height for initial conditions
+    ref_height = max(zref, 100.0)  # Use at least 100m above ground
+    
+    # Calculate velocity at reference height
+    u_mag = (atm.u_star / turb.kappa) * np.log(1.0 + ref_height / atm.z0)
+    
+    # Flow direction
+    flow_dir_rad = np.radians(atm.flow_dir_deg)
+    flow_dir_x = np.cos(flow_dir_rad)
+    flow_dir_y = np.sin(flow_dir_rad)
+    
+    flow_velocity = (u_mag * flow_dir_x, u_mag * flow_dir_y, 0.0)
+    
+    # Calculate k at reference height
+    if ref_height <= 0.99 * atm.h_bl:
+        ratio = min(ref_height / atm.h_bl, 0.99)
+        k_val = (turb.Cmu**(-0.5)) * atm.u_star**2 * (1.0 - ratio)**2
+    else:
+        k_val = (turb.Cmu**(-0.5)) * atm.u_star**2 * (1.0 - 0.99)**2
+    
+    k_val = max(k_val, 1e-6)
+    
+    # Calculate epsilon at reference height
+    if ref_height <= 0.95 * atm.h_bl:
+        denom = turb.kappa * (ref_height + atm.z0)
+    else:
+        denom = turb.kappa * (0.95 * atm.h_bl + atm.z0)
+    
+    eps_val = (turb.Cmu**0.75) * (k_val**1.5) / max(denom, 1e-6)
+    eps_val = max(eps_val, 1e-8)
+    
+    return {
+        'flowVelocity': flow_velocity,
+        'turbulentKE': k_val,
+        'turbulentEpsilon': eps_val,
+        'pressure': 0.0
+    }
+
+def write_initial_conditions_file(case_dir: str, config: ABLConfig, initial_vals):
+    """Write initialConditions file based on inlet profile equations"""
+    include_dir = Path(case_dir) / '0' / 'include'
+    include_dir.mkdir(parents=True, exist_ok=True)
+    
+    
+    
+    content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
+========= |
+\\\\ / F ield | OpenFOAM: The Open Source CFD Toolbox
+\\\\ / O peration | Website: https://openfoam.org
+\\\\ / A nd | Version: 12
+\\\\/ M anipulation |
+\\*---------------------------------------------------------------------------*/
+flowVelocity ({initial_vals['flowVelocity'][0]:.3f} {initial_vals['flowVelocity'][1]:.3f} {initial_vals['flowVelocity'][2]:.3f});
+pressure {initial_vals['pressure']};
+turbulentKE {initial_vals['turbulentKE']:.6f};
+turbulentEpsilon {initial_vals['turbulentEpsilon']:.8f};
+// ************************************************************************* //
+"""
+    
+    with open(include_dir / 'initialConditions', 'w') as f:
+        f.write(content)
+    
+    print(f"Generated initialConditions file with:")
+    print(f"  flowVelocity: {initial_vals['flowVelocity']}")
+    print(f"  turbulentKE: {initial_vals['turbulentKE']:.6f}")
+    print(f"  turbulentEpsilon: {initial_vals['turbulentEpsilon']:.8f}")
 
 def plot_inlet_profiles(z_coords: np.ndarray, U_profiles: np.ndarray, 
                     k_profiles: np.ndarray, epsilon_profiles: np.ndarray,
@@ -524,7 +605,7 @@ if __name__ == "__main__":
     config.mesh.num_cells_z = 50
     config.mesh.expansion_ratio_R = 100.0
     
-    case_dir = "/home/ssudhakaran/sourav_files/6_OpenFOAM/meshStructured"
+    case_dir = "/Users/ssudhakaran/Documents/Simulations/API/openFoam/meshStructured"
     
     # Generate using cell centers (default)
     results = generate_inlet_data_workflow(case_dir, config, use_face_centers=True)
