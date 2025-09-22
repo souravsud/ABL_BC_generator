@@ -126,22 +126,8 @@ def write_openfoam_data_files(case_dir: str, U_profiles: np.ndarray, k_profiles:
     constant_dir = Path(case_dir) / 'constant'
     constant_dir.mkdir(exist_ok=True)
     
-    foam_header = f"""/*--------------------------------*- C++ -*----------------------------------*\\
-                    FoamFile
-                    {{
-                        version     {config.openfoam.version};
-                        format      ascii;
-                        class       CLASS_PLACEHOLDER;
-                        object      OBJECT_PLACEHOLDER;
-                    }}
-                    // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
-
-                    """
-    
     # Write velocity data
     with open(constant_dir / 'inletU', 'w') as f:
-        header = foam_header.replace('CLASS_PLACEHOLDER', 'vectorField').replace('OBJECT_PLACEHOLDER', 'inletU')
-        #f.write(header)
         f.write(f"{len(U_profiles)}\n(\n")
         for u_vec in U_profiles:
             f.write(f"({u_vec[0]:.6f} {u_vec[1]:.6f} {u_vec[2]:.6f})\n")
@@ -149,8 +135,6 @@ def write_openfoam_data_files(case_dir: str, U_profiles: np.ndarray, k_profiles:
     
     # Write k data
     with open(constant_dir / 'inletK', 'w') as f:
-        header = foam_header.replace('CLASS_PLACEHOLDER', 'scalarField').replace('OBJECT_PLACEHOLDER', 'inletK')
-        #f.write(header)
         f.write(f"{len(k_profiles)}\n(\n")
         for k_val in k_profiles:
             f.write(f"{k_val:.8f}\n")
@@ -158,8 +142,6 @@ def write_openfoam_data_files(case_dir: str, U_profiles: np.ndarray, k_profiles:
     
     # Write epsilon data  
     with open(constant_dir / 'inletEpsilon', 'w') as f:
-        header = foam_header.replace('CLASS_PLACEHOLDER', 'scalarField').replace('OBJECT_PLACEHOLDER', 'inletEpsilon')
-        #f.write(header)
         f.write(f"{len(epsilon_profiles)}\n(\n")
         for eps_val in epsilon_profiles:
             f.write(f"{eps_val:.10f}\n")
@@ -200,7 +182,7 @@ boundaryField
     {patches['inlet']}
     {{
         type            fixedValue;
-        value           nonuniform List<vector> 
+        value           nonuniform
         #include        "../constant/inletU"
         ;
     }}
@@ -260,7 +242,7 @@ boundaryField
     {patches['inlet']}
     {{
         type            fixedValue;
-        value           nonuniform List<scalar> 
+        value           nonuniform
         #include        "../constant/inletK"
         ;
     }}
@@ -322,7 +304,7 @@ boundaryField
     {patches['inlet']}
     {{
         type            fixedValue;
-        value           nonuniform List<scalar> 
+        value           nonuniform
         #include        "../constant/inletEpsilon"
         ;
     }}
@@ -458,7 +440,7 @@ def calculate_initial_conditions(config: ABLConfig, use_face_centers: bool = Tru
     atm = config.atmospheric
     turb = config.turbulence
     
-    zref = 500
+    zref = 800
     # Use reference height for initial conditions
     ref_height = max(zref, 100.0)  # Use at least 100m above ground
     
