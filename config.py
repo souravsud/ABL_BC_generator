@@ -21,10 +21,10 @@ class TurbulenceConfig:
 @dataclass
 class MeshConfig:
     """Mesh and boundary configuration"""
-    inlet_height: float = 223.603012           # Fixed flat inlet height above reference (m)
-    domain_height: float = 4000.0       # Sky/top boundary height (m)
-    num_cells_z: int = 50               # Number of vertical cells
-    expansion_ratio_R: float = 100     # Vertical grading expansion ratio
+    inlet_height: float = 217.09           # Fixed flat inlet height above reference (m)
+    domain_height: float = 3000.0       # Sky/top boundary height (m)
+    num_cells_z: int = 80               # Number of vertical cells
+    expansion_ratio_R: float = 110     # Vertical grading expansion ratio
     patch_names: Dict[str, str] = None
     
     def __post_init__(self):

@@ -48,32 +48,40 @@ def calculate_graded_z_distribution(z_ground: float, z_top: float, n_cells: int,
         return z_faces[1:-1]
 
 
-def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_blocks = None, use_face_centers: bool = True) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_centers: bool = True):
     """
-    Calculate U, k, epsilon profiles for inlet based on mesh grading
+    Calculate U, k, epsilon profiles for inlet based on mesh grading from file
     
     Args:
-        config: ABL configuration object
+        config: ABL configuration object (only for atmospheric/turbulence params)
+        inlet_data: tuple of (inlet_blocks, mesh_params) from read_inlet_face_file()
         use_face_centers: If True, use cell centers; if False, use internal faces
         
     Returns:
         Tuple of (U_profiles, k_profiles, epsilon_profiles)
     """
-    atm = config.atmospheric
-    turb = config.turbulence
-    mesh = config.mesh
+    inlet_blocks, mesh_params = inlet_data
     
-    # Calculate z-coordinates based on mesh grading
-    z_coords = calculate_graded_z_distribution(
-        mesh.inlet_height,
-        mesh.domain_height,
-        mesh.num_cells_z,
-        mesh.expansion_ratio_R,
+    atm = config.atmospheric  
+    turb = config.turbulence
+    
+    # Get domain parameters from mesh_params instead of config
+    domain_height = mesh_params['domain_height']
+    avg_inlet_height = mesh_params['avg_inlet_height']
+    
+    # Calculate z-coordinates using parameters from file
+    z_coords = calculate_multiregion_z_distribution(
+        avg_inlet_height,
+        domain_height,
+        mesh_params,
         use_face_centers
     )
     
     # Generate profiles for each block x each z-level
     total_faces = len(inlet_blocks) * len(z_coords)
+    print("Inlet blocks found:", len(inlet_blocks), "with", len(z_coords), "z-levels each.")
+    print(f"Calculating profiles for {total_faces} inlet faces...")
+    
     U_profiles = np.zeros((total_faces, 3))
     k_profiles = np.zeros(total_faces)
     epsilon_profiles = np.zeros(total_faces)
@@ -83,12 +91,12 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_blocks = None, u
     flow_dir_x = np.cos(flow_dir_rad)
     flow_dir_y = np.sin(flow_dir_rad)
     
-    
     face_idx = 0
     for block in inlet_blocks:
         for i, z in enumerate(z_coords):
-            height = max(z - mesh.inlet_height, 0.01)
+            height = max(z - avg_inlet_height, 0.01)
             
+            # [Rest of profile calculation remains the same]
             # Velocity profile
             if height <= atm.h_bl:
                 u_mag = (atm.u_star / turb.kappa) * np.log(1.0 + height / atm.z0)
@@ -116,7 +124,7 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_blocks = None, u
             epsilon_profiles[face_idx] = max(epsilon_profiles[face_idx], 1e-8)
 
             face_idx += 1
-        
+    
     return U_profiles, k_profiles, epsilon_profiles
 
 
@@ -357,32 +365,33 @@ def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None,
                                use_face_centers: bool = True, plot_profiles: bool = True):
     """
     Complete workflow for mesh-based ABL inlet data generation
+    Now reads mesh parameters from inlet face file instead of config
     """
     if config is None:
         config = ABLConfig()
     
     # Add the missing Ustar attribute if not present
     if not hasattr(config.atmospheric, 'u_star'):
-        config.atmospheric.u_star = 0.40  # Use your reference solver value
+        config.atmospheric.u_star = 0.40
     
-    # Read inlet blocks from saved file
+    # Read inlet blocks AND mesh parameters from saved file
     inlet_file = os.path.join(case_dir, "0/include/inletFaceInfo.txt")
-    inlet_blocks = read_inlet_face_file(inlet_file)
+    inlet_data = read_inlet_face_file(inlet_file)  # Returns (inlet_blocks, mesh_params)
+    inlet_blocks, mesh_params = inlet_data
 
-    # Calculate z-coordinates based on mesh grading
-    z_coords = calculate_graded_z_distribution(
-        config.mesh.inlet_height,
-        config.mesh.domain_height,
-        config.mesh.num_cells_z,
-        config.mesh.expansion_ratio_R,
+    # Calculate z-coordinates from file parameters (not config)
+    z_coords = calculate_multiregion_z_distribution(
+        mesh_params['avg_inlet_height'],
+        mesh_params['domain_height'],
+        mesh_params,
         use_face_centers
     )
 
     initial_vals = calculate_initial_conditions(config)
 
-    # Calculate profiles based on mesh grading
+    # Calculate profiles using file data
     U_profiles, k_profiles, epsilon_profiles = calculate_inlet_profiles_from_mesh(
-        config, inlet_blocks, use_face_centers)
+        config, inlet_data, use_face_centers)
     
     # Write data files
     write_openfoam_data_files(case_dir, U_profiles, k_profiles, epsilon_profiles, config)
@@ -406,15 +415,183 @@ def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None,
         'config': config
     }
 
+def create_blockMesh_spacing(n_points, grading_spec):
+    """
+    Create variable spacing coordinates from 0 to 1 using blockMesh-style grading.
+    
+    Parameters:
+    -----------
+    n_points : int
+        Total number of points
+    grading_spec : list of tuples
+        [(length_fraction, cell_fraction, expansion_ratio), ...]
+        - length_fraction: fraction of domain length for this region
+        - cell_fraction: fraction of total cells for this region  
+        - expansion_ratio: last_cell_size/first_cell_size in this region
+    
+    Returns:
+    --------
+    np.ndarray
+        Coordinate array from 0 to 1 with blockMesh-style spacing
+    """
+    
+    total_cells = n_points - 1
+    n_regions = len(grading_spec)
+    
+    # Extract specifications
+    length_fractions = np.array([spec[0] for spec in grading_spec])
+    cell_fractions = np.array([spec[1] for spec in grading_spec])
+    expansion_ratios = np.array([spec[2] for spec in grading_spec])
+    
+    # Validate inputs
+    if abs(length_fractions.sum() - 1.0) > 1e-6:
+        raise ValueError(f"Length fractions sum to {length_fractions.sum():.6f}, must sum to 1.0")
+    
+    if abs(cell_fractions.sum() - 1.0) > 1e-6:
+        raise ValueError(f"Cell fractions sum to {cell_fractions.sum():.6f}, must sum to 1.0")
+    
+    # Calculate target cell counts (may not be integers)
+    target_cells = cell_fractions * total_cells
+    
+    # Round to integers and adjust to maintain total
+    actual_cells = np.round(target_cells).astype(int)
+    
+    # Adjust for rounding errors
+    cell_diff = total_cells - actual_cells.sum()
+    if cell_diff != 0:
+        # Add/subtract cells from regions with largest rounding errors
+        errors = target_cells - actual_cells
+        if cell_diff > 0:
+            # Need to add cells - add to regions with most positive error
+            indices = np.argsort(errors)[::-1]
+        else:
+            # Need to remove cells - remove from regions with most negative error  
+            indices = np.argsort(errors)
+        
+        for i in range(abs(cell_diff)):
+            actual_cells[indices[i]] += np.sign(cell_diff)
+    
+    # Generate coordinates for each region
+    coords = [0.0]  # Start at 0
+    current_pos = 0.0
+    
+    for i, (length_frac, actual_cell_count, expansion_ratio) in enumerate(zip(length_fractions, actual_cells, expansion_ratios)):
+        region_length = length_frac
+        
+        if actual_cell_count == 0:
+            continue
+            
+        # Generate spacing within this region
+        region_coords = generate_region_coordinates(actual_cell_count, expansion_ratio)
+        
+        # Scale to region length and add to current position
+        region_coords_scaled = region_coords * region_length + current_pos
+        
+        # Add coordinates (skip the first one as it's already included)
+        coords.extend(region_coords_scaled[1:])
+        
+        current_pos += region_length
+    
+    return np.array(coords)
+
+def generate_region_coordinates(n_cells, expansion_ratio):
+    """
+    Generate coordinates within a single region [0,1] with given expansion ratio.
+    
+    Parameters:
+    -----------
+    n_cells : int
+        Number of cells in this region
+    expansion_ratio : float
+        Ratio of last_cell_size/first_cell_size
+        
+    Returns:
+    --------
+    np.ndarray
+        Coordinates from 0 to 1 for this region
+    """
+    
+    if n_cells == 0:
+        return np.array([0.0, 1.0])
+    
+    if n_cells == 1:
+        return np.array([0.0, 1.0])
+    
+    # For uniform spacing (expansion_ratio ≈ 1)
+    if abs(expansion_ratio - 1.0) < 1e-6:
+        return np.linspace(0.0, 1.0, n_cells + 1)
+    
+    # For geometric progression
+    r = expansion_ratio**(1.0/(n_cells-1))  # Common ratio between adjacent cells
+    
+    # Calculate first cell size
+    if abs(r - 1.0) < 1e-6:
+        ds = 1.0 / n_cells
+    else:
+        ds = (r - 1.0) / (r**n_cells - 1.0)
+    
+    # Generate cell sizes
+    cell_sizes = ds * r**np.arange(n_cells)
+    
+    # Generate coordinates
+    coords = np.zeros(n_cells + 1)
+    coords[1:] = np.cumsum(cell_sizes)
+    
+    return coords
+
 def read_inlet_face_file(file_path):
-    """Read inlet face information from blockMesh generator"""
+    """Read inlet face information and mesh parameters from blockMesh generator"""
     inlet_blocks = []
+    mesh_params = {}
+    
+    print("Reading inlet face information from:", file_path)
     
     with open(file_path, 'r') as f:
-        for line in f:
-            if line.startswith('#'):
-                continue
-            parts = line.strip().split(',')
+        lines = f.readlines()
+    
+    # Parse mesh parameters section
+    in_mesh_section = False
+    in_face_section = False
+    
+    for line in lines:
+        line = line.strip()
+        
+        if line == "# MESH_PARAMETERS_START":
+            in_mesh_section = True
+            continue
+        elif line == "# MESH_PARAMETERS_END":
+            in_mesh_section = False
+            continue
+        elif line == "# FACE_DATA_START":
+            in_face_section = True
+            continue
+        elif line == "# FACE_DATA_END":
+            in_face_section = False
+            continue
+        
+        # Parse mesh parameters
+        if in_mesh_section and '=' in line:
+            key, value = line.split('=', 1)
+            if key == 'z_grading':
+                # Parse z_grading format: "0.04,0.25,2.5;0.96,0.75,100.0"
+                grading_specs = []
+                for spec_str in value.split(';'):
+                    parts = [float(x) for x in spec_str.split(',')]
+                    grading_specs.append(tuple(parts))
+                mesh_params[key] = grading_specs
+            else:
+                # Try to convert to appropriate type
+                try:
+                    if '.' in value:
+                        mesh_params[key] = float(value)
+                    else:
+                        mesh_params[key] = int(value) if value.isdigit() else value
+                except ValueError:
+                    mesh_params[key] = value
+        
+        # Parse face data
+        if in_face_section and not line.startswith('#') and line:
+            parts = line.split(',')
             if len(parts) == 5:
                 inlet_blocks.append({
                     'block_i': int(parts[0]),
@@ -424,7 +601,66 @@ def read_inlet_face_file(file_path):
                     'z_ground': float(parts[4])
                 })
     
-    return inlet_blocks
+    print(f"Read {len(inlet_blocks)} inlet blocks and mesh parameters:")
+    for key, value in mesh_params.items():
+        print(f"  {key}: {value}")
+    
+    return inlet_blocks, mesh_params
+
+def calculate_multiregion_z_distribution(z_ground: float, z_top: float, mesh_params: dict, 
+                                       use_face_centers: bool = True) -> np.ndarray:
+    """
+    Calculate z-coordinates for multi-region grading using mesh parameters from file.
+    """
+    domain_height = z_top - z_ground
+    
+    if mesh_params.get('mesh_type') == 'legacy':
+        # Use legacy single expansion
+        return calculate_graded_z_distribution(
+            z_ground, z_top, 
+            mesh_params['num_cells_z'], 
+            mesh_params['expansion_ratio_z'],
+            use_face_centers
+        )
+    
+    # Handle new grading system
+    total_cells = mesh_params['total_z_cells']
+    z_grading = mesh_params['z_grading']
+    first_cell_height = mesh_params.get('first_cell_height')
+    
+    # Create normalized coordinates using blockMesh spacing logic
+    if first_cell_height is not None:
+        # With first cell
+        first_cell_frac = first_cell_height / domain_height
+        remaining_height_frac = 1.0 - first_cell_frac
+        
+        # Create coordinates for remaining layers
+        remaining_cells = total_cells - 1
+        if remaining_cells > 0:
+            # Use your blockMesh spacing function for remaining layers
+            remaining_coords = create_blockMesh_spacing(remaining_cells + 1, z_grading)
+            # Scale to remaining height and add first cell
+            z_normalized = np.zeros(total_cells + 1)
+            z_normalized[0] = 0.0
+            z_normalized[1] = first_cell_frac
+            z_normalized[2:] = first_cell_frac + remaining_coords[1:] * remaining_height_frac
+        else:
+            # Only first cell
+            z_normalized = np.array([0.0, first_cell_frac, 1.0])
+    else:
+        # No first cell, use standard grading
+        z_normalized = create_blockMesh_spacing(total_cells + 1, z_grading)
+    
+    # Convert to actual coordinates
+    z_faces = z_ground + z_normalized * domain_height
+    
+    if use_face_centers:
+        # Return cell centers
+        return 0.5 * (z_faces[:-1] + z_faces[1:])
+    else:
+        # Return internal faces (excluding boundaries)
+        return z_faces[1:-1]
+
 
 def calculate_initial_conditions(config: ABLConfig, use_face_centers: bool = True) -> dict:
     """
@@ -583,11 +819,11 @@ if __name__ == "__main__":
     # Simple usage with defaults
     config = ABLConfig()
     config.mesh.inlet_height = 0.0
-    config.mesh.domain_height = 4000.0
-    config.mesh.num_cells_z = 50
+    config.mesh.domain_height = 3000.0
+    config.mesh.num_cells_z = 80
     config.mesh.expansion_ratio_R = 100.0
     
-    case_dir = "/Users/ssudhakaran/Documents/Simulations/API/openFoam/meshStructured"
+    case_dir = "/Users/ssudhakaran/Documents/Simulations/API/openFoam/meshRefine"
     
     # Generate using cell centers (default)
     results = generate_inlet_data_workflow(case_dir, config, use_face_centers=True)
