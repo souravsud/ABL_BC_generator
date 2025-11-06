@@ -1,8 +1,9 @@
 import numpy as np
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, Optional
 from config import ABLConfig
 import os
+import warnings
 import matplotlib.pyplot as plt
 
 def calculate_graded_z_distribution(z_ground: float, z_top: float, n_cells: int, 
@@ -92,16 +93,28 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_c
     flow_dir_y = np.sin(flow_dir_rad)
     
     face_idx = 0
+    local_z0 = 0
     for block in inlet_blocks:
+        
+        if config.atmospheric.z0 == 0.0:
+            if 'z0' in block:
+                local_z0 = block['z0']
+            else:
+                warnings.warn("'z0' not found in block- check inletFaceInfo.txt", UserWarning)
+                return
+        else:
+            warnings.warn("Using constant surface roughness approach. Set z0 to 0 to use roughness maps", UserWarning)
+            local_z0 = config.atmospheric.z0
+        
+        
         for i, z in enumerate(z_coords):
             height = max(z - avg_inlet_height, 0.01)
             
-            # [Rest of profile calculation remains the same]
             # Velocity profile
             if height <= atm.h_bl:
-                u_mag = (atm.u_star / turb.kappa) * np.log(1.0 + height / atm.z0)
+                u_mag = (atm.u_star / turb.kappa) * np.log(1.0 + height / local_z0)
             else:
-                u_mag = (atm.u_star / turb.kappa) * np.log(1.0 + atm.h_bl / atm.z0)
+                u_mag = (atm.u_star / turb.kappa) * np.log(1.0 + atm.h_bl / local_z0)
                 
             U_profiles[face_idx] = [u_mag * flow_dir_x, u_mag * flow_dir_y, 0.0]
             
@@ -116,9 +129,9 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_c
             
             # Epsilon profile
             if height <= 0.95 * atm.h_bl:
-                denom = turb.kappa * (height + atm.z0)
+                denom = turb.kappa * (height + local_z0)
             else:
-                denom = turb.kappa * (0.95 * atm.h_bl + atm.z0)
+                denom = turb.kappa * (0.95 * atm.h_bl + local_z0)
                 
             epsilon_profiles[face_idx] = (turb.Cmu**0.75) * (k_profiles[face_idx]**1.5) / max(denom, 1e-6)
             epsilon_profiles[face_idx] = max(epsilon_profiles[face_idx], 1e-8)
@@ -349,6 +362,73 @@ boundaryField
 
 // ************************************************************************* //
 """
+
+    # nut boundary condition file
+    if config.atmospheric.z0 == 0.0:
+        z0_specification =f"""#include "include/z0Values";"""
+    else:
+        z0_specification =f"""uniform {config.atmospheric.z0};"""
+    nut_content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
+| =========                 |                                                 |
+| \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\\\    /   O peration     | Version:  {foam_version}                                 |
+|   \\\\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\\\/     M anipulation  |                                                 |
+\\*---------------------------------------------------------------------------*/
+FoamFile
+{{
+    version     {config.openfoam.version};
+    format      ascii;
+    class       volScalarField;
+    location    "0";
+    object      nut;
+}}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 2 -1 0 0 0 0];
+
+internalField   uniform 0;
+
+boundaryField
+{{
+    {patches['inlet']}
+    {{
+        type            calculated;
+        value           uniform 0;
+    }}
+    
+    {patches['outlet']}
+    {{
+        type            calculated;
+        value           uniform 0;
+    }}
+    
+    {patches['ground']}
+    {{
+        type            {config.openfoam.wall_functions['ground_nut']['type']};
+        z0              {z0_specification}
+        value           uniform {config.openfoam.wall_functions['ground_k']['value']};
+    }}
+    
+    {patches['sky']}
+    {{
+        type            {config.openfoam.boundary_conditions['nut']['sky']['type']};
+    }}
+    
+    {patches['sides']}
+    {{
+        type            calculated;
+        value           uniform 0;
+    }}
+    
+    "proc.*"
+    {{
+        type            processor;
+    }}
+}}
+
+// ************************************************************************* //
+"""
     
     # Write the files
     with open(zero_dir / 'U', 'w') as f:
@@ -359,6 +439,9 @@ boundaryField
         
     with open(zero_dir / 'epsilon', 'w') as f:
         f.write(epsilon_content)
+    
+    with open(zero_dir / 'nut', 'w') as f:
+        f.write(nut_content)
 
 
 def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None, 
@@ -369,10 +452,6 @@ def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None,
     """
     if config is None:
         config = ABLConfig()
-    
-    # Add the missing Ustar attribute if not present
-    if not hasattr(config.atmospheric, 'u_star'):
-        config.atmospheric.u_star = 0.40
     
     # Read inlet blocks AND mesh parameters from saved file
     inlet_file = os.path.join(case_dir, "0/include/inletFaceInfo.txt")
@@ -387,7 +466,14 @@ def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None,
         use_face_centers
     )
 
-    initial_vals = calculate_initial_conditions(config)
+    # Calculate mean z0 from inlet blocks (if available)
+    z0_mean = None
+    if inlet_blocks and 'z0' in inlet_blocks[0]:
+        z0_values = [block['z0'] for block in inlet_blocks]
+        z0_mean = np.mean(z0_values)
+        print(f"Mean inlet z0: {z0_mean:.4f} m (from {len(z0_values)} blocks)")
+        
+    initial_vals = calculate_initial_conditions(config, z0_mean=z0_mean)
 
     # Calculate profiles using file data
     U_profiles, k_profiles, epsilon_profiles = calculate_inlet_profiles_from_mesh(
@@ -399,8 +485,8 @@ def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None,
     # Generate boundary condition files
     generate_boundary_condition_files(case_dir, config, initial_vals)
     
-    # Generate initial conditions file  # <-- NEW
-    write_initial_conditions_file(case_dir, config, initial_vals)  # <-- NEW
+    # Generate initial conditions file
+    write_initial_conditions_file(case_dir, config, initial_vals)
     
     # Optional plotting
     if plot_profiles:
@@ -412,6 +498,7 @@ def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None,
         'k_profiles': k_profiles,
         'epsilon_profiles': epsilon_profiles,
         'z_coords': z_coords,
+        'z0_mean': z0_mean,
         'config': config
     }
 
@@ -540,7 +627,7 @@ def generate_region_coordinates(n_cells, expansion_ratio):
     return coords
 
 def read_inlet_face_file(file_path):
-    """Read inlet face information and mesh parameters from blockMesh generator"""
+    """Read inlet face information including z0 values"""
     inlet_blocks = []
     mesh_params = {}
     
@@ -549,7 +636,6 @@ def read_inlet_face_file(file_path):
     with open(file_path, 'r') as f:
         lines = f.readlines()
     
-    # Parse mesh parameters section
     in_mesh_section = False
     in_face_section = False
     
@@ -573,14 +659,12 @@ def read_inlet_face_file(file_path):
         if in_mesh_section and '=' in line:
             key, value = line.split('=', 1)
             if key == 'z_grading':
-                # Parse z_grading format: "0.04,0.25,2.5;0.96,0.75,100.0"
                 grading_specs = []
                 for spec_str in value.split(';'):
                     parts = [float(x) for x in spec_str.split(',')]
                     grading_specs.append(tuple(parts))
                 mesh_params[key] = grading_specs
             else:
-                # Try to convert to appropriate type
                 try:
                     if '.' in value:
                         mesh_params[key] = float(value)
@@ -589,21 +673,34 @@ def read_inlet_face_file(file_path):
                 except ValueError:
                     mesh_params[key] = value
         
-        # Parse face data
+        # Parse face data (NOW WITH Z0)
         if in_face_section and not line.startswith('#') and line:
             parts = line.split(',')
-            if len(parts) == 5:
-                inlet_blocks.append({
+            if len(parts) >= 5:  # Support both old (5) and new (6) formats
+                inlet_block = {
                     'block_i': int(parts[0]),
                     'block_j': int(parts[1]), 
                     'x_ground': float(parts[2]),
                     'y_ground': float(parts[3]),
                     'z_ground': float(parts[4])
-                })
+                }
+                # Read z0 if available (new format)
+                if len(parts) == 6:
+                    inlet_block['z0'] = float(parts[5])
+                
+                inlet_blocks.append(inlet_block)
     
     print(f"Read {len(inlet_blocks)} inlet blocks and mesh parameters:")
     for key, value in mesh_params.items():
         print(f"  {key}: {value}")
+    
+    # Check if z0 data was included
+    has_z0 = 'z0' in inlet_blocks[0] if inlet_blocks else False
+    if has_z0:
+        z0_values = [block['z0'] for block in inlet_blocks]
+        print(f"  z0 data included: min={min(z0_values):.4f}, max={max(z0_values):.4f}, mean={np.mean(z0_values):.4f}")
+    else:
+        print("  WARNING: No z0 data found, will use uniform z0 from config")
     
     return inlet_blocks, mesh_params
 
@@ -613,15 +710,6 @@ def calculate_multiregion_z_distribution(z_ground: float, z_top: float, mesh_par
     Calculate z-coordinates for multi-region grading using mesh parameters from file.
     """
     domain_height = z_top - z_ground
-    
-    if mesh_params.get('mesh_type') == 'legacy':
-        # Use legacy single expansion
-        return calculate_graded_z_distribution(
-            z_ground, z_top, 
-            mesh_params['num_cells_z'], 
-            mesh_params['expansion_ratio_z'],
-            use_face_centers
-        )
     
     # Handle new grading system
     total_cells = mesh_params['total_z_cells']
@@ -662,13 +750,13 @@ def calculate_multiregion_z_distribution(z_ground: float, z_top: float, mesh_par
         return z_faces[1:-1]
 
 
-def calculate_initial_conditions(config: ABLConfig, use_face_centers: bool = True) -> dict:
+def calculate_initial_conditions(config: ABLConfig, z0_mean: Optional[float] = None) -> dict:
     """
     Calculate representative initial condition values based on inlet profile equations
     
     Args:
         config: ABL configuration object
-        use_face_centers: If True, use cell centers; if False, use internal faces
+        z0_mean: Optional mean z0 from inlet faces. If None, uses config.atmospheric.z0
         
     Returns:
         Dictionary with flowVelocity, turbulentKE, turbulentEpsilon values
@@ -676,12 +764,19 @@ def calculate_initial_conditions(config: ABLConfig, use_face_centers: bool = Tru
     atm = config.atmospheric
     turb = config.turbulence
     
-    zref = 800
-    # Use reference height for initial conditions
-    ref_height = max(zref, 100.0)  # Use at least 100m above ground
+    # Use mean z0 if provided, otherwise fall back to config
+    z0_value = z0_mean if z0_mean is not None else atm.z0
     
-    # Calculate velocity at reference height
-    u_mag = (atm.u_star / turb.kappa) * np.log(1.0 + ref_height / atm.z0)
+    if z0_mean is not None:
+        print(f"Using mean z0={z0_mean:.4f} for initial conditions")
+    else:
+        print(f"Using config z0={atm.z0:.4f} for initial conditions")
+    
+    zref = 800
+    ref_height = max(zref, 100.0)
+    
+    # Calculate velocity at reference height using mean/config z0
+    u_mag = (atm.u_star / turb.kappa) * np.log(1.0 + ref_height / z0_value)
     
     # Flow direction
     flow_dir_rad = np.radians(atm.flow_dir_deg)
@@ -699,11 +794,11 @@ def calculate_initial_conditions(config: ABLConfig, use_face_centers: bool = Tru
     
     k_val = max(k_val, 1e-6)
     
-    # Calculate epsilon at reference height
+    # Calculate epsilon at reference height using mean/config z0
     if ref_height <= 0.95 * atm.h_bl:
-        denom = turb.kappa * (ref_height + atm.z0)
+        denom = turb.kappa * (ref_height + z0_value)
     else:
-        denom = turb.kappa * (0.95 * atm.h_bl + atm.z0)
+        denom = turb.kappa * (0.95 * atm.h_bl + z0_value)
     
     eps_val = (turb.Cmu**0.75) * (k_val**1.5) / max(denom, 1e-6)
     eps_val = max(eps_val, 1e-8)
@@ -712,7 +807,8 @@ def calculate_initial_conditions(config: ABLConfig, use_face_centers: bool = Tru
         'flowVelocity': flow_velocity,
         'turbulentKE': k_val,
         'turbulentEpsilon': eps_val,
-        'pressure': 0.0
+        'pressure': 0.0,
+        'z0_used': z0_value  # Store for reference
     }
 
 def write_initial_conditions_file(case_dir: str, config: ABLConfig, initial_vals):
@@ -818,10 +914,6 @@ if __name__ == "__main__":
     
     # Simple usage with defaults
     config = ABLConfig()
-    config.mesh.inlet_height = 0.0
-    config.mesh.domain_height = 3000.0
-    config.mesh.num_cells_z = 80
-    config.mesh.expansion_ratio_R = 100.0
     
     case_dir = "/Users/ssudhakaran/Documents/Simulations/API/openFoam/meshRefine"
     

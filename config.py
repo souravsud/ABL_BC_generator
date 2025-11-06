@@ -5,8 +5,8 @@ from typing import Dict
 @dataclass
 class AtmosphericConfig:
     """Atmospheric boundary layer parameters"""
-    u_star: float = 0.40          # friction velocity
-    z0: float = 0.1             # Surface roughness (m)
+    u_star: float = 0.25          # friction velocity
+    z0: float = 0.0             # Surface roughness (m)- uses roughness map if 0
     h_bl: float = 1500.0        # Boundary layer height (m)
     flow_dir_deg: float = 45.0  # Flow direction (degrees from x-axis)
 
@@ -21,10 +21,6 @@ class TurbulenceConfig:
 @dataclass
 class MeshConfig:
     """Mesh and boundary configuration"""
-    inlet_height: float = 217.09           # Fixed flat inlet height above reference (m)
-    domain_height: float = 3000.0       # Sky/top boundary height (m)
-    num_cells_z: int = 80               # Number of vertical cells
-    expansion_ratio_R: float = 110     # Vertical grading expansion ratio
     patch_names: Dict[str, str] = None
     
     def __post_init__(self):
@@ -44,7 +40,7 @@ class OpenFOAMConfig:
     version: str = "2.0"
     foam_version: str = "v12"
     wall_functions: Dict[str, Dict] = None
-    boundary_conditions: Dict[str, Dict[str, Dict]] = None  # NEW
+    boundary_conditions: Dict[str, Dict[str, Dict]] = None
     
     def __post_init__(self):
         if self.wall_functions is None:
@@ -56,7 +52,9 @@ class OpenFOAMConfig:
                     'kappa': 0.4, 
                     'E': 9.8,
                     'value': 0.0016
-                }
+                },
+                'ground_nut': {'type': 'nutkAtmRoughWallFunction',
+                               'value': 0.0},
             }
         
         # Default boundary conditions
@@ -78,6 +76,9 @@ class OpenFOAMConfig:
                     'outlet': {'type': 'zeroGradient'},
                     'sky': {'type': 'slip'},
                     'sides': {'type': 'slip'}
+                },
+                'nut': {
+                    'sky': {'type': 'slip'},
                 }
             }
 
