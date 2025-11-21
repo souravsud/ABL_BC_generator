@@ -144,7 +144,7 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_c
 def write_openfoam_data_files(case_dir: str, U_profiles: np.ndarray, k_profiles: np.ndarray, 
                              epsilon_profiles: np.ndarray, config: ABLConfig):
     """Write boundary condition data files for OpenFOAM"""
-    constant_dir = Path(case_dir) / 'constant'
+    constant_dir = Path(case_dir) / '0' / 'include'
     constant_dir.mkdir(exist_ok=True)
     
     # Write velocity data
@@ -204,7 +204,7 @@ boundaryField
     {{
         type            fixedValue;
         value           nonuniform
-        #include        "../constant/inletU"
+        #include        "include/inletU"
         ;
     }}
     
@@ -264,7 +264,7 @@ boundaryField
     {{
         type            fixedValue;
         value           nonuniform
-        #include        "../constant/inletK"
+        #include        "include/inletK"
         ;
     }}
     
@@ -326,7 +326,7 @@ boundaryField
     {{
         type            fixedValue;
         value           nonuniform
-        #include        "../constant/inletEpsilon"
+        #include        "include/inletEpsilon"
         ;
     }}
     
@@ -772,18 +772,22 @@ def calculate_initial_conditions(config: ABLConfig, z0_mean: Optional[float] = N
     else:
         print(f"Using config z0={atm.z0:.4f} for initial conditions")
     
-    zref = 800
-    ref_height = max(zref, 100.0)
+    ref_height = 800 
+    vel_scaling = 0.25
+    #instead of initialising the field to zero value- here we try to compute an initial value based on inlet condition
+    #the values at 800m altitude is then scaled down to be used as the initial values 
+    #(this scaling down is necessory since velocity will be almost max at this height and at lower height turb quantities will be very high)
     
     # Calculate velocity at reference height using mean/config z0
     u_mag = (atm.u_star / turb.kappa) * np.log(1.0 + ref_height / z0_value)
+    u_mag_scaled = u_mag *vel_scaling
     
     # Flow direction
     flow_dir_rad = np.radians(atm.flow_dir_deg)
     flow_dir_x = np.cos(flow_dir_rad)
     flow_dir_y = np.sin(flow_dir_rad)
     
-    flow_velocity = (u_mag * flow_dir_x, u_mag * flow_dir_y, 0.0)
+    flow_velocity = (u_mag_scaled * flow_dir_x, u_mag_scaled * flow_dir_y, 0.0)
     
     # Calculate k at reference height
     if ref_height <= 0.99 * atm.h_bl:
