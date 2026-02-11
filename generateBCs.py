@@ -177,6 +177,11 @@ def generate_boundary_condition_files(case_dir: str, config: ABLConfig, initial_
     patches = config.mesh.patch_names
     foam_version = config.openfoam.foam_version
     
+    if config.atmospheric.z0 == 0.0:
+        z0_specification =f"""#include "include/z0Values";"""
+    else:
+        z0_specification =f"""uniform {config.atmospheric.z0};"""
+    
     # U boundary condition file
     u_content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
 | =========                 |                                                 |
@@ -338,9 +343,7 @@ boundaryField
     {patches['ground']}
     {{
         type            {eps_wall['type']};
-        Cmu             {eps_wall['Cmu']};
-        kappa           {eps_wall['kappa']};
-        E               {eps_wall['E']};
+        z0              {z0_specification}
         value           uniform {eps_wall['value']};
     }}
     
@@ -364,10 +367,6 @@ boundaryField
 """
 
     # nut boundary condition file
-    if config.atmospheric.z0 == 0.0:
-        z0_specification =f"""#include "include/z0Values";"""
-    else:
-        z0_specification =f"""uniform {config.atmospheric.z0};"""
     nut_content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
 | =========                 |                                                 |
 | \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
@@ -919,7 +918,7 @@ if __name__ == "__main__":
     # Simple usage with defaults
     config = ABLConfig()
     
-    case_dir = "/Users/ssudhakaran/Documents/Simulations/API/openFoam/meshRefine"
+    case_dir = "/Users/ssudhakaran/Documents/validation/validationMeshCases/zASL"
     
     # Generate using cell centers (default)
     results = generate_inlet_data_workflow(case_dir, config, use_face_centers=True)

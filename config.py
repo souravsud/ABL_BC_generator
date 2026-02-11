@@ -47,13 +47,10 @@ class OpenFOAMConfig:
             self.wall_functions = {
                 'ground_k': {'type': 'kqRWallFunction', 'value': 0.0},
                 'ground_epsilon': {
-                    'type': 'epsilonWallFunction',
-                    'Cmu': 0.033,
-                    'kappa': 0.4, 
-                    'E': 9.8,
+                    'type': 'atmEpsilonWallFunction',
                     'value': 0.0016
                 },
-                'ground_nut': {'type': 'nutkAtmRoughWallFunction',
+                'ground_nut': {'type': 'atmNutkWallFunction',
                                'value': 0.0},
             }
         
