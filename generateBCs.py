@@ -444,10 +444,18 @@ boundaryField
 
 
 def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None, 
-                               use_face_centers: bool = True, plot_profiles: bool = True):
+                               use_face_centers: bool = True, plot_profiles: bool = True,
+                               validate_profiles: bool = True):
     """
     Complete workflow for mesh-based ABL inlet data generation
     Now reads mesh parameters from inlet face file instead of config
+    
+    Args:
+        case_dir: Case directory containing inlet face file
+        config: ABL configuration (optional, defaults to ABLConfig())
+        use_face_centers: Whether to use cell centers (True) or internal faces (False)
+        plot_profiles: Whether to generate basic profile plots
+        validate_profiles: Whether to run comprehensive validation (recommended)
     """
     if config is None:
         config = ABLConfig()
@@ -487,8 +495,16 @@ def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None,
     # Generate initial conditions file
     write_initial_conditions_file(case_dir, config, initial_vals)
     
-    # Optional plotting
-    if plot_profiles:
+    # Run comprehensive validation if requested
+    validation_results = None
+    if validate_profiles:
+        from validate_profiles import run_comprehensive_validation
+        validation_results = run_comprehensive_validation(
+            case_dir, config, inlet_data, U_profiles, k_profiles,
+            epsilon_profiles, z_coords, generate_plots=True
+        )
+    # Optional basic plotting (if validation not run)
+    elif plot_profiles:
         plot_inlet_profiles(z_coords, U_profiles, k_profiles, epsilon_profiles, 
                           config, save_dir=case_dir)
     
@@ -498,7 +514,9 @@ def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None,
         'epsilon_profiles': epsilon_profiles,
         'z_coords': z_coords,
         'z0_mean': z0_mean,
-        'config': config
+        'config': config,
+        'inlet_data': inlet_data,
+        'validation_results': validation_results
     }
 
 def create_blockMesh_spacing(n_points, grading_spec):
@@ -920,8 +938,14 @@ if __name__ == "__main__":
     
     case_dir = "/Users/ssudhakaran/Documents/validation/validationMeshCases/zASL"
     
-    # Generate using cell centers (default)
-    results = generate_inlet_data_workflow(case_dir, config, use_face_centers=True)
+    # Generate using cell centers with comprehensive validation (recommended)
+    results = generate_inlet_data_workflow(case_dir, config, use_face_centers=True, 
+                                          validate_profiles=True)
+    
+    # Or generate without validation (faster, uses basic plotting only)
+    # results = generate_inlet_data_workflow(case_dir, config, use_face_centers=True,
+    #                                       validate_profiles=False, plot_profiles=True)
     
     # Or generate using internal faces
-    # results = generate_inlet_data_workflow(case_dir, config, use_face_centers=False)
+    # results = generate_inlet_data_workflow(case_dir, config, use_face_centers=False,
+    #                                       validate_profiles=True)
