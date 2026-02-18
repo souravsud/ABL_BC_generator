@@ -248,13 +248,14 @@ def write_openfoam_data_files(case_dir: str, U_profiles: np.ndarray, k_profiles:
     )
 
 
-def _generate_foam_file_header(foam_version: str, class_type: str, object_name: str, 
-                               location: str = None) -> str:
+def _generate_foam_file_header(foam_version: str, file_version: str, class_type: str, 
+                               object_name: str, location: str = None) -> str:
     """
     Generate standard OpenFOAM file header.
     
     Args:
-        foam_version: OpenFOAM version string
+        foam_version: OpenFOAM version string (e.g., "v12")
+        file_version: File format version (e.g., "2.0")
         class_type: Field class (volVectorField, volScalarField, etc.)
         object_name: Object name (U, k, epsilon, nut, etc.)
         location: Optional location string (e.g., "0")
@@ -273,7 +274,7 @@ def _generate_foam_file_header(foam_version: str, class_type: str, object_name: 
 \\*---------------------------------------------------------------------------*/
 FoamFile
 {{
-    version     2.0;
+    version     {file_version};
     format      ascii;
     class       {class_type};
 {location_line}    object      {object_name};
@@ -289,14 +290,15 @@ def generate_boundary_condition_files(case_dir: str, config: ABLConfig, initial_
     
     patches = config.mesh.patch_names
     foam_version = config.openfoam.foam_version
+    file_version = config.openfoam.version
     
     if config.atmospheric.z0 == 0.0:
-        z0_specification = '#include "include/z0Values";'
+        z0_specification = f'#include "include/z0Values";'
     else:
         z0_specification = f"uniform {config.atmospheric.z0};"
     
     # U boundary condition file
-    u_header = _generate_foam_file_header(foam_version, "volVectorField", "U")
+    u_header = _generate_foam_file_header(foam_version, file_version, "volVectorField", "U")
     u_content = f"""{u_header}
 dimensions      [0 1 -1 0 0 0 0];
 
@@ -342,7 +344,7 @@ boundaryField
 """
     
     # k boundary condition file
-    k_header = _generate_foam_file_header(foam_version, "volScalarField", "k")
+    k_header = _generate_foam_file_header(foam_version, file_version, "volScalarField", "k")
     k_content = f"""{k_header}
 dimensions      [0 2 -2 0 0 0 0];
 
@@ -390,7 +392,7 @@ boundaryField
 
     # epsilon boundary condition file
     eps_wall = config.openfoam.wall_functions['ground_epsilon']
-    epsilon_header = _generate_foam_file_header(foam_version, "volScalarField", "epsilon")
+    epsilon_header = _generate_foam_file_header(foam_version, file_version, "volScalarField", "epsilon")
     epsilon_content = f"""{epsilon_header}
 dimensions      [0 2 -3 0 0 0 0];
 
@@ -438,7 +440,7 @@ boundaryField
 """
 
     # nut boundary condition file
-    nut_header = _generate_foam_file_header(foam_version, "volScalarField", "nut", location="0")
+    nut_header = _generate_foam_file_header(foam_version, file_version, "volScalarField", "nut", location="0")
     nut_content = f"""{nut_header}
 dimensions      [0 2 -1 0 0 0 0];
 
