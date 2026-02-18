@@ -6,6 +6,18 @@ import os
 import warnings
 import matplotlib.pyplot as plt
 
+# Physical constants for ABL profile calculations
+MIN_HEIGHT = 0.01  # Minimum height threshold (m)
+K_PROFILE_HEIGHT_RATIO = 0.99  # Height ratio for k-profile calculation
+EPSILON_HEIGHT_RATIO = 0.95  # Height ratio for epsilon calculation
+MIN_K_VALUE = 1e-6  # Minimum turbulent kinetic energy (m²/s²)
+MIN_EPSILON_VALUE = 1e-8  # Minimum dissipation rate (m²/s³)
+MIN_DENOM_VALUE = 1e-6  # Minimum denominator value to avoid division by zero
+
+# Initial condition calculation parameters
+REF_HEIGHT_INITIAL = 800  # Reference height for initial conditions (m)
+VELOCITY_SCALING = 0.25  # Velocity scaling factor for initial conditions
+
 def calculate_graded_z_distribution(z_ground: float, z_top: float, n_cells: int, 
                                   expansion_ratio: float, use_face_centers: bool = True) -> np.ndarray:
     """
@@ -47,6 +59,76 @@ def calculate_graded_z_distribution(z_ground: float, z_top: float, n_cells: int,
     else:
         # Return internal faces (excluding boundaries)
         return z_faces[1:-1]
+
+
+def calculate_turbulence_profiles(height: float, h_bl: float, u_star: float, 
+                                  Cmu: float, kappa: float, z0: float) -> Tuple[float, float]:
+    """
+    Calculate turbulent kinetic energy (k) and dissipation rate (epsilon) profiles.
+    
+    This function consolidates the duplicated turbulence calculation logic used in both
+    inlet profile generation and initial condition calculation.
+    
+    Args:
+        height: Height above ground (m)
+        h_bl: Boundary layer height (m)
+        u_star: Friction velocity (m/s)
+        Cmu: Turbulence constant
+        kappa: Von Karman constant
+        z0: Surface roughness length (m)
+        
+    Returns:
+        Tuple of (k_value, epsilon_value)
+    """
+    # Calculate turbulent kinetic energy (k)
+    if height <= K_PROFILE_HEIGHT_RATIO * h_bl:
+        ratio = min(height / h_bl, K_PROFILE_HEIGHT_RATIO)
+        k_val = (Cmu**(-0.5)) * u_star**2 * (1.0 - ratio)**2
+    else:
+        k_val = (Cmu**(-0.5)) * u_star**2 * (1.0 - K_PROFILE_HEIGHT_RATIO)**2
+    
+    k_val = max(k_val, MIN_K_VALUE)
+    
+    # Calculate dissipation rate (epsilon)
+    if height <= EPSILON_HEIGHT_RATIO * h_bl:
+        denom = kappa * (height + z0)
+    else:
+        denom = kappa * (EPSILON_HEIGHT_RATIO * h_bl + z0)
+    
+    eps_val = (Cmu**0.75) * (k_val**1.5) / max(denom, MIN_DENOM_VALUE)
+    eps_val = max(eps_val, MIN_EPSILON_VALUE)
+    
+    return k_val, eps_val
+
+
+def get_z0_value(config: ABLConfig, block: dict) -> float:
+    """
+    Get surface roughness value (z0) from block data or config.
+    
+    Args:
+        config: ABL configuration object
+        block: Block dictionary that may contain 'z0' key
+        
+    Returns:
+        Surface roughness value (m)
+        
+    Raises:
+        ValueError: If z0 is 0 in config and not found in block
+    """
+    if config.atmospheric.z0 == 0.0:
+        if 'z0' in block:
+            return block['z0']
+        else:
+            raise ValueError("'z0' not found in block and config.atmospheric.z0 is 0. "
+                           "Check inletFaceInfo.txt or set z0 in config.")
+    else:
+        if config.atmospheric.z0 != 0.0 and 'z0' in block:
+            # Only warn once per session to avoid spam
+            warnings.warn(
+                "Using constant surface roughness approach. Set z0 to 0 to use roughness maps", 
+                UserWarning
+            )
+        return config.atmospheric.z0
 
 
 def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_centers: bool = True):
@@ -93,22 +175,16 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_c
     flow_dir_y = np.sin(flow_dir_rad)
     
     face_idx = 0
-    local_z0 = 0
     for block in inlet_blocks:
-        
-        if config.atmospheric.z0 == 0.0:
-            if 'z0' in block:
-                local_z0 = block['z0']
-            else:
-                warnings.warn("'z0' not found in block- check inletFaceInfo.txt", UserWarning)
-                return
-        else:
-            warnings.warn("Using constant surface roughness approach. Set z0 to 0 to use roughness maps", UserWarning)
-            local_z0 = config.atmospheric.z0
-        
+        # Get z0 value using helper function
+        try:
+            local_z0 = get_z0_value(config, block)
+        except ValueError as e:
+            warnings.warn(str(e), UserWarning)
+            return
         
         for i, z in enumerate(z_coords):
-            height = max(z - avg_inlet_height, 0.01)
+            height = max(z - avg_inlet_height, MIN_HEIGHT)
             
             # Velocity profile
             if height <= atm.h_bl:
@@ -118,27 +194,30 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_c
                 
             U_profiles[face_idx] = [u_mag * flow_dir_x, u_mag * flow_dir_y, 0.0]
             
-            # TKE profile  
-            if height <= 0.99 * atm.h_bl:
-                ratio = min(height / atm.h_bl, 0.99)
-                k_profiles[face_idx] = (turb.Cmu**(-0.5)) * atm.u_star**2 * (1.0 - ratio)**2
-            else:
-                k_profiles[face_idx] = (turb.Cmu**(-0.5)) * atm.u_star**2 * (1.0 - 0.99)**2
-                
-            k_profiles[face_idx] = max(k_profiles[face_idx], 1e-6)
-            
-            # Epsilon profile
-            if height <= 0.95 * atm.h_bl:
-                denom = turb.kappa * (height + local_z0)
-            else:
-                denom = turb.kappa * (0.95 * atm.h_bl + local_z0)
-                
-            epsilon_profiles[face_idx] = (turb.Cmu**0.75) * (k_profiles[face_idx]**1.5) / max(denom, 1e-6)
-            epsilon_profiles[face_idx] = max(epsilon_profiles[face_idx], 1e-8)
+            # Calculate turbulence profiles using helper function
+            k_profiles[face_idx], epsilon_profiles[face_idx] = calculate_turbulence_profiles(
+                height, atm.h_bl, atm.u_star, turb.Cmu, turb.kappa, local_z0
+            )
 
             face_idx += 1
     
     return U_profiles, k_profiles, epsilon_profiles
+
+
+def _write_profile_to_file(filepath: Path, data: np.ndarray, format_func):
+    """
+    Helper function to write profile data to OpenFOAM format file.
+    
+    Args:
+        filepath: Path to the output file
+        data: Profile data array
+        format_func: Function to format each data entry
+    """
+    with open(filepath, 'w') as f:
+        f.write(f"{len(data)}\n(\n")
+        for item in data:
+            f.write(format_func(item))
+        f.write(")\n\n// ************************************************************************* //\n")
 
 
 def write_openfoam_data_files(case_dir: str, U_profiles: np.ndarray, k_profiles: np.ndarray, 
@@ -147,26 +226,60 @@ def write_openfoam_data_files(case_dir: str, U_profiles: np.ndarray, k_profiles:
     constant_dir = Path(case_dir) / '0' / 'include'
     constant_dir.mkdir(exist_ok=True)
     
-    # Write velocity data
-    with open(constant_dir / 'inletU', 'w') as f:
-        f.write(f"{len(U_profiles)}\n(\n")
-        for u_vec in U_profiles:
-            f.write(f"({u_vec[0]:.6f} {u_vec[1]:.6f} {u_vec[2]:.6f})\n")
-        f.write(")\n\n// ************************************************************************* //\n")
+    # Write velocity data (vector format)
+    _write_profile_to_file(
+        constant_dir / 'inletU',
+        U_profiles,
+        lambda u_vec: f"({u_vec[0]:.6f} {u_vec[1]:.6f} {u_vec[2]:.6f})\n"
+    )
     
-    # Write k data
-    with open(constant_dir / 'inletK', 'w') as f:
-        f.write(f"{len(k_profiles)}\n(\n")
-        for k_val in k_profiles:
-            f.write(f"{k_val:.8f}\n")
-        f.write(")\n\n// ************************************************************************* //\n")
+    # Write k data (scalar format)
+    _write_profile_to_file(
+        constant_dir / 'inletK',
+        k_profiles,
+        lambda k_val: f"{k_val:.8f}\n"
+    )
     
-    # Write epsilon data  
-    with open(constant_dir / 'inletEpsilon', 'w') as f:
-        f.write(f"{len(epsilon_profiles)}\n(\n")
-        for eps_val in epsilon_profiles:
-            f.write(f"{eps_val:.10f}\n")
-        f.write(")\n\n// ************************************************************************* //\n")
+    # Write epsilon data (scalar format)
+    _write_profile_to_file(
+        constant_dir / 'inletEpsilon',
+        epsilon_profiles,
+        lambda eps_val: f"{eps_val:.10f}\n"
+    )
+
+
+def _generate_foam_file_header(foam_version: str, class_type: str, object_name: str, 
+                               location: str = None) -> str:
+    """
+    Generate standard OpenFOAM file header.
+    
+    Args:
+        foam_version: OpenFOAM version string
+        class_type: Field class (volVectorField, volScalarField, etc.)
+        object_name: Object name (U, k, epsilon, nut, etc.)
+        location: Optional location string (e.g., "0")
+        
+    Returns:
+        Formatted OpenFOAM header string
+    """
+    location_line = f"    location    \"{location}\";\n" if location else ""
+    
+    return f"""/*--------------------------------*- C++ -*----------------------------------*\\
+| =========                 |                                                 |
+| \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\\\    /   O peration     | Version:  {foam_version}                                 |
+|   \\\\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\\\/     M anipulation  |                                                 |
+\\*---------------------------------------------------------------------------*/
+FoamFile
+{{
+    version     2.0;
+    format      ascii;
+    class       {class_type};
+{location_line}    object      {object_name};
+}}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+"""
 
 
 def generate_boundary_condition_files(case_dir: str, config: ABLConfig, initial_vals):
@@ -178,27 +291,13 @@ def generate_boundary_condition_files(case_dir: str, config: ABLConfig, initial_
     foam_version = config.openfoam.foam_version
     
     if config.atmospheric.z0 == 0.0:
-        z0_specification =f"""#include "include/z0Values";"""
+        z0_specification = '#include "include/z0Values";'
     else:
-        z0_specification =f"""uniform {config.atmospheric.z0};"""
+        z0_specification = f"uniform {config.atmospheric.z0};"
     
     # U boundary condition file
-    u_content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
-| =========                 |                                                 |
-| \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\\\    /   O peration     | Version:  {foam_version}                                 |
-|   \\\\  /    A nd           | Website:  www.openfoam.com                      |
-|    \\\\/     M anipulation  |                                                 |
-\\*---------------------------------------------------------------------------*/
-FoamFile
-{{
-    version     {config.openfoam.version};
-    format      ascii;
-    class       volVectorField;
-    object      U;
-}}
-// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
-
+    u_header = _generate_foam_file_header(foam_version, "volVectorField", "U")
+    u_content = f"""{u_header}
 dimensions      [0 1 -1 0 0 0 0];
 
 internalField   uniform ({initial_vals['flowVelocity'][0]:.3f} {initial_vals['flowVelocity'][1]:.3f} {initial_vals['flowVelocity'][2]:.3f});
@@ -243,22 +342,8 @@ boundaryField
 """
     
     # k boundary condition file
-    k_content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
-| =========                 |                                                 |
-| \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\\\    /   O peration     | Version:  {foam_version}                                 |
-|   \\\\  /    A nd           | Website:  www.openfoam.com                      |
-|    \\\\/     M anipulation  |                                                 |
-\\*---------------------------------------------------------------------------*/
-FoamFile
-{{
-    version     {config.openfoam.version};
-    format      ascii;
-    class       volScalarField;
-    object      k;
-}}
-// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
-
+    k_header = _generate_foam_file_header(foam_version, "volScalarField", "k")
+    k_content = f"""{k_header}
 dimensions      [0 2 -2 0 0 0 0];
 
 internalField   uniform {initial_vals['turbulentKE']:.6f};
@@ -305,22 +390,8 @@ boundaryField
 
     # epsilon boundary condition file
     eps_wall = config.openfoam.wall_functions['ground_epsilon']
-    epsilon_content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
-| =========                 |                                                 |
-| \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\\\    /   O peration     | Version:  {foam_version}                                 |
-|   \\\\  /    A nd           | Website:  www.openfoam.com                      |
-|    \\\\/     M anipulation  |                                                 |
-\\*---------------------------------------------------------------------------*/
-FoamFile
-{{
-    version     {config.openfoam.version};
-    format      ascii;
-    class       volScalarField;
-    object      epsilon;
-}}
-// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
-
+    epsilon_header = _generate_foam_file_header(foam_version, "volScalarField", "epsilon")
+    epsilon_content = f"""{epsilon_header}
 dimensions      [0 2 -3 0 0 0 0];
 
 internalField   uniform {initial_vals['turbulentEpsilon']:.8f};
@@ -367,23 +438,8 @@ boundaryField
 """
 
     # nut boundary condition file
-    nut_content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
-| =========                 |                                                 |
-| \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\\\    /   O peration     | Version:  {foam_version}                                 |
-|   \\\\  /    A nd           | Website:  www.openfoam.com                      |
-|    \\\\/     M anipulation  |                                                 |
-\\*---------------------------------------------------------------------------*/
-FoamFile
-{{
-    version     {config.openfoam.version};
-    format      ascii;
-    class       volScalarField;
-    location    "0";
-    object      nut;
-}}
-// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
-
+    nut_header = _generate_foam_file_header(foam_version, "volScalarField", "nut", location="0")
+    nut_content = f"""{nut_header}
 dimensions      [0 2 -1 0 0 0 0];
 
 internalField   uniform 0;
@@ -771,15 +827,14 @@ def calculate_initial_conditions(config: ABLConfig, z0_mean: Optional[float] = N
     else:
         print(f"Using config z0={atm.z0:.4f} for initial conditions")
     
-    ref_height = 800 
-    vel_scaling = 0.25
-    #instead of initialising the field to zero value- here we try to compute an initial value based on inlet condition
-    #the values at 800m altitude is then scaled down to be used as the initial values 
-    #(this scaling down is necessory since velocity will be almost max at this height and at lower height turb quantities will be very high)
+    # Instead of initialising the field to zero value, compute an initial value based on inlet condition.
+    # The values at reference height are then scaled down to be used as the initial values
+    # (this scaling down is necessary since velocity will be almost max at this height 
+    # and at lower height turb quantities will be very high)
     
     # Calculate velocity at reference height using mean/config z0
-    u_mag = (atm.u_star / turb.kappa) * np.log(1.0 + ref_height / z0_value)
-    u_mag_scaled = u_mag *vel_scaling
+    u_mag = (atm.u_star / turb.kappa) * np.log(1.0 + REF_HEIGHT_INITIAL / z0_value)
+    u_mag_scaled = u_mag * VELOCITY_SCALING
     
     # Flow direction
     flow_dir_rad = np.radians(atm.flow_dir_deg)
@@ -788,23 +843,10 @@ def calculate_initial_conditions(config: ABLConfig, z0_mean: Optional[float] = N
     
     flow_velocity = (u_mag_scaled * flow_dir_x, u_mag_scaled * flow_dir_y, 0.0)
     
-    # Calculate k at reference height
-    if ref_height <= 0.99 * atm.h_bl:
-        ratio = min(ref_height / atm.h_bl, 0.99)
-        k_val = (turb.Cmu**(-0.5)) * atm.u_star**2 * (1.0 - ratio)**2
-    else:
-        k_val = (turb.Cmu**(-0.5)) * atm.u_star**2 * (1.0 - 0.99)**2
-    
-    k_val = max(k_val, 1e-6)
-    
-    # Calculate epsilon at reference height using mean/config z0
-    if ref_height <= 0.95 * atm.h_bl:
-        denom = turb.kappa * (ref_height + z0_value)
-    else:
-        denom = turb.kappa * (0.95 * atm.h_bl + z0_value)
-    
-    eps_val = (turb.Cmu**0.75) * (k_val**1.5) / max(denom, 1e-6)
-    eps_val = max(eps_val, 1e-8)
+    # Calculate turbulence profiles using helper function
+    k_val, eps_val = calculate_turbulence_profiles(
+        REF_HEIGHT_INITIAL, atm.h_bl, atm.u_star, turb.Cmu, turb.kappa, z0_value
+    )
     
     return {
         'flowVelocity': flow_velocity,
@@ -914,11 +956,18 @@ def plot_inlet_profiles(z_coords: np.ndarray, U_profiles: np.ndarray,
     
 # Example usage
 if __name__ == "__main__":
+    import sys
     
     # Simple usage with defaults
     config = ABLConfig()
     
-    case_dir = "/Users/ssudhakaran/Documents/validation/validationMeshCases/zASL"
+    # Get case directory from command line or use current directory
+    if len(sys.argv) > 1:
+        case_dir = sys.argv[1]
+    else:
+        case_dir = "."
+        print("Usage: python generateBCs.py <case_directory>")
+        print(f"Using current directory: {case_dir}")
     
     # Generate using cell centers (default)
     results = generate_inlet_data_workflow(case_dir, config, use_face_centers=True)
