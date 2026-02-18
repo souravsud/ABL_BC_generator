@@ -123,8 +123,12 @@ def validate_flow_direction(U_profiles: np.ndarray, flow_dir_deg: float,
     actual_dirs_rad = np.arctan2(v_horiz, u_horiz)
     actual_dirs_deg = np.degrees(actual_dirs_rad)
     
-    # Direction errors
-    dir_errors_deg = np.abs(actual_dirs_deg - flow_dir_deg)
+    # Normalize to [0, 360]
+    actual_dirs_deg = np.mod(actual_dirs_deg, 360)
+    expected_dir_normalized = np.mod(flow_dir_deg, 360)
+    
+    # Direction errors with proper wraparound handling
+    dir_errors_deg = np.abs(actual_dirs_deg - expected_dir_normalized)
     # Handle wraparound at 360 degrees
     dir_errors_deg = np.minimum(dir_errors_deg, 360 - dir_errors_deg)
     
