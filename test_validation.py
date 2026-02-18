@@ -109,8 +109,9 @@ def test_validation_functions():
     print(f"  Max error: {velocity_results['max_error_percent']:.6f}%")
     print(f"  Mean error: {velocity_results['mean_error_percent']:.6f}%")
     print(f"  RMSE: {velocity_results['rmse']:.8f} m/s")
-    # Relaxed criteria for synthetic test (floating point precision)
-    passes_velocity = velocity_results['mean_error_percent'] < 5.0  # 5% for test
+    # Relaxed criteria (5%) for synthetic test data to accommodate floating-point precision
+    # issues in profile generation. Production code uses stricter 0.1% threshold.
+    passes_velocity = velocity_results['mean_error_percent'] < 5.0
     print(f"  Status: {'✓ PASS' if passes_velocity else '✗ FAIL'}")
     print()
     
@@ -167,8 +168,9 @@ def test_validation_functions():
     print(f"  Mean error: {epsilon_results['mean_error_percent']:.6f}%")
     print(f"  Min epsilon: {epsilon_results['min_epsilon']:.6e} m²/s³")
     print(f"  Max epsilon: {epsilon_results['max_epsilon']:.6e} m²/s³")
-    # Relaxed criteria for synthetic test
-    passes_epsilon = epsilon_results['mean_error_percent'] < 5.0  # 5% for test
+    # Relaxed criteria (5%) for synthetic test data to accommodate floating-point precision
+    # issues in profile generation. Production code uses stricter 1% threshold.
+    passes_epsilon = epsilon_results['mean_error_percent'] < 5.0
     print(f"  Status: {'✓ PASS' if passes_epsilon else '✗ FAIL'}")
     print()
     

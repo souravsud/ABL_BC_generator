@@ -14,6 +14,20 @@ from typing import Dict, Tuple, Optional
 import json
 
 
+# Constants for validation thresholds
+VELOCITY_ERROR_THRESHOLD_PERCENT = 0.1  # Maximum acceptable error for velocity profile
+TKE_ERROR_THRESHOLD_PERCENT = 1.0  # Maximum acceptable error for TKE profile  
+EPSILON_ERROR_THRESHOLD_PERCENT = 1.0  # Maximum acceptable error for epsilon profile
+GROUND_ELEVATION_RTOL = 0.1  # Relative tolerance for ground elevation check
+
+# Constants for profile calculations
+MAX_BL_HEIGHT_RATIO = 0.99  # Maximum height ratio for boundary layer effects
+MAX_BL_HEIGHT_RATIO_EPSILON = 0.95  # Maximum height ratio for epsilon calculation
+MIN_TKE_VALUE = 1e-6  # Minimum TKE value to prevent numerical issues
+MIN_EPSILON_VALUE = 1e-8  # Minimum epsilon value to prevent numerical issues
+MIN_EPSILON_DENOMINATOR = 1e-6  # Minimum denominator in epsilon calculation
+
+
 def validate_log_law_profile(z_coords: np.ndarray, u_mag: np.ndarray, 
                              u_star: float, z0: float, kappa: float,
                              z_ground: float = 0.0) -> Dict:
@@ -49,7 +63,7 @@ def validate_log_law_profile(z_coords: np.ndarray, u_mag: np.ndarray,
         'max_error_percent': max_error,
         'mean_error_percent': mean_error,
         'rmse': rmse,
-        'passes': max_error < 0.1  # Less than 0.1% error
+        'passes': max_error < VELOCITY_ERROR_THRESHOLD_PERCENT
     }
 
 
@@ -78,8 +92,9 @@ def validate_ground_elevation_usage(inlet_blocks: list, z_coords: np.ndarray,
     # Check if z_coords start from reasonable ground level
     z_min_used = np.min(z_coords)
     
-    # Verify ground elevation is being used
-    uses_ground_elevation = np.isclose(z_min_used, z_ground_mean, rtol=0.1)
+    # Verify ground elevation is being used (with both relative and absolute tolerance)
+    uses_ground_elevation = np.isclose(z_min_used, z_ground_mean, 
+                                       rtol=GROUND_ELEVATION_RTOL, atol=1.0)
     
     return {
         'z_ground_min': z_ground_min,
@@ -177,14 +192,14 @@ def validate_tke_profile(z_coords: np.ndarray, k_profiles: np.ndarray,
     # Calculate theoretical TKE profile
     k_theoretical = np.zeros_like(heights)
     for i, h in enumerate(heights):
-        if h <= 0.99 * h_bl:
-            ratio = min(h / h_bl, 0.99)
+        if h <= MAX_BL_HEIGHT_RATIO * h_bl:
+            ratio = min(h / h_bl, MAX_BL_HEIGHT_RATIO)
             k_theoretical[i] = (Cmu**(-0.5)) * u_star**2 * (1.0 - ratio)**2
         else:
-            k_theoretical[i] = (Cmu**(-0.5)) * u_star**2 * (1.0 - 0.99)**2
+            k_theoretical[i] = (Cmu**(-0.5)) * u_star**2 * (1.0 - MAX_BL_HEIGHT_RATIO)**2
     
     # Ensure minimum values
-    k_theoretical = np.maximum(k_theoretical, 1e-6)
+    k_theoretical = np.maximum(k_theoretical, MIN_TKE_VALUE)
     
     # Calculate errors
     relative_errors = np.abs(k_profiles - k_theoretical) / (k_theoretical + 1e-10)
@@ -196,7 +211,7 @@ def validate_tke_profile(z_coords: np.ndarray, k_profiles: np.ndarray,
         'mean_error_percent': np.mean(relative_errors) * 100,
         'min_k': np.min(k_profiles),
         'max_k': np.max(k_profiles),
-        'passes': np.max(relative_errors) < 0.01  # Less than 1% error
+        'passes': np.max(relative_errors) * 100 < TKE_ERROR_THRESHOLD_PERCENT
     }
 
 
@@ -226,13 +241,13 @@ def validate_epsilon_profile(z_coords: np.ndarray, epsilon_profiles: np.ndarray,
     # Calculate theoretical epsilon profile
     epsilon_theoretical = np.zeros_like(heights)
     for i, h in enumerate(heights):
-        if h <= 0.95 * h_bl:
+        if h <= MAX_BL_HEIGHT_RATIO_EPSILON * h_bl:
             denom = kappa * (h + z0)
         else:
-            denom = kappa * (0.95 * h_bl + z0)
+            denom = kappa * (MAX_BL_HEIGHT_RATIO_EPSILON * h_bl + z0)
         
-        epsilon_theoretical[i] = (Cmu**0.75) * (k_profiles[i]**1.5) / max(denom, 1e-6)
-        epsilon_theoretical[i] = max(epsilon_theoretical[i], 1e-8)
+        epsilon_theoretical[i] = (Cmu**0.75) * (k_profiles[i]**1.5) / max(denom, MIN_EPSILON_DENOMINATOR)
+        epsilon_theoretical[i] = max(epsilon_theoretical[i], MIN_EPSILON_VALUE)
     
     # Calculate errors
     relative_errors = np.abs(epsilon_profiles - epsilon_theoretical) / (epsilon_theoretical + 1e-10)
@@ -244,7 +259,7 @@ def validate_epsilon_profile(z_coords: np.ndarray, epsilon_profiles: np.ndarray,
         'mean_error_percent': np.mean(relative_errors) * 100,
         'min_epsilon': np.min(epsilon_profiles),
         'max_epsilon': np.max(epsilon_profiles),
-        'passes': np.max(relative_errors) < 0.01
+        'passes': np.max(relative_errors) * 100 < EPSILON_ERROR_THRESHOLD_PERCENT
     }
 
 

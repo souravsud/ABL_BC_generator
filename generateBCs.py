@@ -445,7 +445,7 @@ boundaryField
 
 def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None, 
                                use_face_centers: bool = True, plot_profiles: bool = True,
-                               validate_profiles: bool = True):
+                               validate_profiles: bool = True, generate_validation_plots: bool = True):
     """
     Complete workflow for mesh-based ABL inlet data generation
     Now reads mesh parameters from inlet face file instead of config
@@ -454,8 +454,9 @@ def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None,
         case_dir: Case directory containing inlet face file
         config: ABL configuration (optional, defaults to ABLConfig())
         use_face_centers: Whether to use cell centers (True) or internal faces (False)
-        plot_profiles: Whether to generate basic profile plots
+        plot_profiles: Whether to generate basic profile plots (only used if validate_profiles=False)
         validate_profiles: Whether to run comprehensive validation (recommended)
+        generate_validation_plots: Whether to generate plots during validation (only used if validate_profiles=True)
     """
     if config is None:
         config = ABLConfig()
@@ -501,7 +502,7 @@ def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None,
         from validate_profiles import run_comprehensive_validation
         validation_results = run_comprehensive_validation(
             case_dir, config, inlet_data, U_profiles, k_profiles,
-            epsilon_profiles, z_coords, generate_plots=True
+            epsilon_profiles, z_coords, generate_plots=generate_validation_plots
         )
     # Optional basic plotting (if validation not run)
     elif plot_profiles:

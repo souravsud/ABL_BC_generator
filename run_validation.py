@@ -46,35 +46,49 @@ def read_generated_profiles(case_dir: str):
         lines = f.readlines()
         n_profiles = int(lines[0].strip())
         U_profiles = []
-        for line in lines[2:n_profiles+2]:  # Skip header lines
+        skipped_u = 0
+        for line_num, line in enumerate(lines[2:n_profiles+2], start=2):  # Skip header lines
             line = line.strip().strip('()').split()
             if len(line) == 3:
                 U_profiles.append([float(x) for x in line])
+            else:
+                skipped_u += 1
+                print(f"Warning: Skipped malformed U profile at line {line_num}: '{line}'")
         U_profiles = np.array(U_profiles)
+        if skipped_u > 0:
+            print(f"Warning: Skipped {skipped_u} malformed U profile lines")
     
     # Read k profiles
     with open(include_dir / 'inletK', 'r') as f:
         lines = f.readlines()
         n_profiles = int(lines[0].strip())
         k_profiles = []
-        for line in lines[2:n_profiles+2]:
+        skipped_k = 0
+        for line_num, line in enumerate(lines[2:n_profiles+2], start=2):
             try:
                 k_profiles.append(float(line.strip()))
             except ValueError:
-                pass
+                skipped_k += 1
+                print(f"Warning: Skipped malformed k profile at line {line_num}: '{line.strip()}'")
         k_profiles = np.array(k_profiles)
+        if skipped_k > 0:
+            print(f"Warning: Skipped {skipped_k} malformed k profile lines")
     
     # Read epsilon profiles
     with open(include_dir / 'inletEpsilon', 'r') as f:
         lines = f.readlines()
         n_profiles = int(lines[0].strip())
         epsilon_profiles = []
-        for line in lines[2:n_profiles+2]:
+        skipped_eps = 0
+        for line_num, line in enumerate(lines[2:n_profiles+2], start=2):
             try:
                 epsilon_profiles.append(float(line.strip()))
             except ValueError:
-                pass
+                skipped_eps += 1
+                print(f"Warning: Skipped malformed epsilon profile at line {line_num}: '{line.strip()}'")
         epsilon_profiles = np.array(epsilon_profiles)
+        if skipped_eps > 0:
+            print(f"Warning: Skipped {skipped_eps} malformed epsilon profile lines")
     
     return U_profiles, k_profiles, epsilon_profiles
 
