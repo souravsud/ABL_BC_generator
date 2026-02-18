@@ -201,8 +201,8 @@ FoamFile
 
 **After:** Template function:
 ```python
-def _generate_foam_file_header(foam_version: str, class_type: str, object_name: str, 
-                               location: str = None) -> str:
+def _generate_foam_file_header(foam_version: str, file_version: str, class_type: str, 
+                               object_name: str, location: str = None) -> str:
     """Generate standard OpenFOAM file header."""
     location_line = f"    location    \"{location}\";\n" if location else ""
     
@@ -215,7 +215,7 @@ def _generate_foam_file_header(foam_version: str, class_type: str, object_name: 
 \\*---------------------------------------------------------------------------*/
 FoamFile
 {{
-    version     2.0;
+    version     {file_version};
     format      ascii;
     class       {class_type};
 {location_line}    object      {object_name};
@@ -223,9 +223,11 @@ FoamFile
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 """
 
-# Usage:
-u_header = _generate_foam_file_header(foam_version, "volVectorField", "U")
-k_header = _generate_foam_file_header(foam_version, "volScalarField", "k")
+# Usage (with config values):
+foam_version = config.openfoam.foam_version
+file_version = config.openfoam.version
+u_header = _generate_foam_file_header(foam_version, file_version, "volVectorField", "U")
+k_header = _generate_foam_file_header(foam_version, file_version, "volScalarField", "k")
 ```
 
 **Benefits:**

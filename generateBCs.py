@@ -293,7 +293,7 @@ def generate_boundary_condition_files(case_dir: str, config: ABLConfig, initial_
     file_version = config.openfoam.version
     
     if config.atmospheric.z0 == 0.0:
-        z0_specification = f'#include "include/z0Values";'
+        z0_specification = f"#include \"include/z0Values\";"
     else:
         z0_specification = f"uniform {config.atmospheric.z0};"
     
