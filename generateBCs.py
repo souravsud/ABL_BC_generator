@@ -160,6 +160,10 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_c
     flow_dir_x = np.cos(flow_dir_rad)
     flow_dir_y = np.sin(flow_dir_rad)
     
+    # Validate that we have inlet blocks
+    if not inlet_blocks:
+        raise ValueError("No inlet blocks found in inlet data")
+    
     # First pass: calculate number of z-levels per block to allocate arrays
     # All blocks should have the same number of z-levels (same mesh grading)
     # Use first block to determine this
@@ -190,7 +194,7 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_c
     epsilon_profiles = np.zeros(total_faces)
     
     face_idx = 0
-    for block_num, block in enumerate(inlet_blocks):
+    for block in inlet_blocks:
         # Get z0 value using helper function
         try:
             local_z0 = get_z0_value(config, block)
