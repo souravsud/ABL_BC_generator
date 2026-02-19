@@ -133,7 +133,11 @@ def get_z0_value(config: ABLConfig, block: dict) -> float:
 
 def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_centers: bool = True):
     """
-    Calculate U, k, epsilon profiles for inlet based on mesh grading from file
+    Calculate U, k, epsilon profiles for inlet based on mesh grading from file.
+    
+    Each inlet block's profiles are calculated using its individual z_ground value,
+    ensuring profiles start at the cell above each block's actual ground elevation
+    and extend to the domain ceiling.
     
     Args:
         config: ABL configuration object (only for atmospheric/turbulence params)
@@ -150,32 +154,43 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_c
     
     # Get domain parameters from mesh_params instead of config
     domain_height = mesh_params['domain_height']
-    avg_inlet_height = mesh_params['avg_inlet_height']
-    
-    # Calculate z-coordinates using parameters from file
-    z_coords = calculate_multiregion_z_distribution(
-        avg_inlet_height,
-        domain_height,
-        mesh_params,
-        use_face_centers
-    )
-    
-    # Generate profiles for each block x each z-level
-    total_faces = len(inlet_blocks) * len(z_coords)
-    print("Inlet blocks found:", len(inlet_blocks), "with", len(z_coords), "z-levels each.")
-    print(f"Calculating profiles for {total_faces} inlet faces...")
-    
-    U_profiles = np.zeros((total_faces, 3))
-    k_profiles = np.zeros(total_faces)
-    epsilon_profiles = np.zeros(total_faces)
     
     # Flow direction
     flow_dir_rad = np.radians(atm.flow_dir_deg)
     flow_dir_x = np.cos(flow_dir_rad)
     flow_dir_y = np.sin(flow_dir_rad)
     
+    # First pass: calculate number of z-levels per block to allocate arrays
+    # All blocks should have the same number of z-levels (same mesh grading)
+    # Use first block to determine this
+    test_z_coords = calculate_multiregion_z_distribution(
+        inlet_blocks[0]['z_ground'],
+        domain_height,
+        mesh_params,
+        use_face_centers
+    )
+    n_z_levels = len(test_z_coords)
+    
+    # Generate profiles for each block x each z-level
+    total_faces = len(inlet_blocks) * n_z_levels
+    print(f"Inlet blocks found: {len(inlet_blocks)}, each with {n_z_levels} z-levels.")
+    print(f"Calculating profiles for {total_faces} inlet faces...")
+    
+    # Check for varying ground elevations
+    z_ground_values = [block['z_ground'] for block in inlet_blocks]
+    z_ground_min, z_ground_max = min(z_ground_values), max(z_ground_values)
+    if z_ground_max - z_ground_min > 1e-6:
+        print(f"  Ground elevation varies: min={z_ground_min:.3f}m, max={z_ground_max:.3f}m")
+        print(f"  Profiles will be aligned to each block's individual ground elevation.")
+    else:
+        print(f"  Ground elevation is uniform: {z_ground_min:.3f}m")
+    
+    U_profiles = np.zeros((total_faces, 3))
+    k_profiles = np.zeros(total_faces)
+    epsilon_profiles = np.zeros(total_faces)
+    
     face_idx = 0
-    for block in inlet_blocks:
+    for block_num, block in enumerate(inlet_blocks):
         # Get z0 value using helper function
         try:
             local_z0 = get_z0_value(config, block)
@@ -183,8 +198,19 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_c
             warnings.warn(str(e), UserWarning)
             return
         
+        # Calculate z-coordinates for THIS specific block using its individual z_ground
+        block_z_ground = block['z_ground']
+        z_coords = calculate_multiregion_z_distribution(
+            block_z_ground,
+            domain_height,
+            mesh_params,
+            use_face_centers
+        )
+        
+        # Generate profile for each z-level in this block
         for i, z in enumerate(z_coords):
-            height = max(z - avg_inlet_height, MIN_HEIGHT)
+            # Height above this block's ground (not average)
+            height = max(z - block_z_ground, MIN_HEIGHT)
             
             # Velocity profile
             if height <= atm.h_bl:
@@ -515,7 +541,8 @@ def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None,
     inlet_data = read_inlet_face_file(inlet_file)  # Returns (inlet_blocks, mesh_params)
     inlet_blocks, mesh_params = inlet_data
 
-    # Calculate z-coordinates from file parameters (not config)
+    # Calculate representative z-coordinates for plotting purposes only
+    # (actual profiles use each block's individual z_ground)
     z_coords = calculate_multiregion_z_distribution(
         mesh_params['avg_inlet_height'],
         mesh_params['domain_height'],
