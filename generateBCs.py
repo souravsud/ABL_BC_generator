@@ -135,9 +135,9 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_c
     """
     Calculate U, k, epsilon profiles for inlet based on mesh grading from file.
     
-    Each inlet block's profiles are calculated using its individual z_ground value,
-    ensuring profiles start at the cell above each block's actual ground elevation
-    and extend to the domain ceiling.
+    IMPORTANT: All blocks share the same z-coordinates (mesh structure requirement),
+    but profiles are calculated based on height above each block's individual z_ground.
+    This ensures OpenFOAM compatibility while maintaining physical correctness.
     
     Args:
         config: ABL configuration object (only for atmospheric/turbulence params)
@@ -154,30 +154,24 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_c
     
     # Get domain parameters from mesh_params instead of config
     domain_height = mesh_params['domain_height']
-    
-    # Flow direction
-    flow_dir_rad = np.radians(atm.flow_dir_deg)
-    flow_dir_x = np.cos(flow_dir_rad)
-    flow_dir_y = np.sin(flow_dir_rad)
+    avg_inlet_height = mesh_params['avg_inlet_height']
     
     # Validate that we have inlet blocks
     if not inlet_blocks:
         raise ValueError("No inlet blocks found in inlet data")
     
-    # First pass: calculate number of z-levels per block to allocate arrays
-    # All blocks should have the same number of z-levels (same mesh grading)
-    # Use first block to determine this
-    test_z_coords = calculate_multiregion_z_distribution(
-        inlet_blocks[0]['z_ground'],
+    # Calculate z-coordinates ONCE for all blocks (same mesh structure)
+    # This uses avg_inlet_height as reference, ensuring consistent z-coordinates
+    z_coords = calculate_multiregion_z_distribution(
+        avg_inlet_height,
         domain_height,
         mesh_params,
         use_face_centers
     )
-    n_z_levels = len(test_z_coords)
     
     # Generate profiles for each block x each z-level
-    total_faces = len(inlet_blocks) * n_z_levels
-    print(f"Inlet blocks found: {len(inlet_blocks)}, each with {n_z_levels} z-levels.")
+    total_faces = len(inlet_blocks) * len(z_coords)
+    print(f"Inlet blocks found: {len(inlet_blocks)}, each with {len(z_coords)} z-levels.")
     print(f"Calculating profiles for {total_faces} inlet faces...")
     
     # Check for varying ground elevations
@@ -185,9 +179,14 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_c
     z_ground_min, z_ground_max = min(z_ground_values), max(z_ground_values)
     if z_ground_max - z_ground_min > 1e-6:
         print(f"  Ground elevation varies: min={z_ground_min:.3f}m, max={z_ground_max:.3f}m")
-        print(f"  Profiles will be aligned to each block's individual ground elevation.")
+        print(f"  Profiles calculated using height above each block's individual ground.")
     else:
         print(f"  Ground elevation is uniform: {z_ground_min:.3f}m")
+    
+    # Flow direction
+    flow_dir_rad = np.radians(atm.flow_dir_deg)
+    flow_dir_x = np.cos(flow_dir_rad)
+    flow_dir_y = np.sin(flow_dir_rad)
     
     U_profiles = np.zeros((total_faces, 3))
     k_profiles = np.zeros(total_faces)
@@ -202,18 +201,12 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_c
             warnings.warn(str(e), UserWarning)
             return
         
-        # Calculate z-coordinates for THIS specific block using its individual z_ground
+        # Get this block's ground elevation
         block_z_ground = block['z_ground']
-        z_coords = calculate_multiregion_z_distribution(
-            block_z_ground,
-            domain_height,
-            mesh_params,
-            use_face_centers
-        )
         
-        # Generate profile for each z-level in this block
+        # Generate profile for each z-level using SAME z_coords but individual ground
         for i, z in enumerate(z_coords):
-            # Height above this block's ground (not average)
+            # Height above THIS block's ground (key difference between blocks)
             height = max(z - block_z_ground, MIN_HEIGHT)
             
             # Velocity profile
