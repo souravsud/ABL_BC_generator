@@ -4,7 +4,7 @@
 
 User reported: "mass balance crashes out in the first iteration when i use this code to generate my BCs"
 
-The recent "alignment fix" (commits 79c9935-bb1b30f) broke OpenFOAM simulations by calculating different z-coordinates for each inlet block.
+The recent "alignment fix" (recent commits on this branch) broke OpenFOAM simulations by calculating different z-coordinates for each inlet block.
 
 ## Root Cause Analysis
 
