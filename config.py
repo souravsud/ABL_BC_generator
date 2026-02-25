@@ -1,14 +1,17 @@
-from dataclasses import dataclass
-from typing import Dict
+from dataclasses import dataclass, field
+from typing import Dict, Optional
 
 
 @dataclass
 class AtmosphericConfig:
     """Atmospheric boundary layer parameters"""
-    u_star: float = 0.25          # friction velocity
-    z0: float = 0.0             # Surface roughness (m)- uses roughness map if 0
-    h_bl: float = 1500.0        # Boundary layer height (m)
-    flow_dir_deg: float = 45.0  # Flow direction (degrees from x-axis)
+    u_star: float = 0.25              # friction velocity (m/s); overridden if U_ref/z_ref provided
+    z0: float = 0.0                   # Surface roughness (m) - uses roughness map if 0
+    h_bl: float = 1500.0             # Boundary layer height (m)
+    wind_dir_met: float = 225.0      # Meteorological wind direction (degrees):
+                                      # 0=FROM north, 90=FROM east, 180=FROM south, 270=FROM west
+    U_ref: Optional[float] = None    # Reference wind speed (m/s); if set with z_ref, u_star is derived
+    z_ref: Optional[float] = None    # Reference height (m) for U_ref
 
 
 @dataclass

@@ -87,11 +87,14 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_c
     k_profiles = np.zeros(total_faces)
     epsilon_profiles = np.zeros(total_faces)
     
-    # Flow direction
-    flow_dir_rad = np.radians(atm.flow_dir_deg)
+    # Flow direction: convert meteorological convention to Cartesian
+    # Met convention: 0=FROM north, 90=FROM east, 180=FROM south, 270=FROM west
+    # Cartesian: angle from +x axis (east)
+    flow_dir_cartesian_deg = (270.0 - atm.wind_dir_met) % 360.0
+    flow_dir_rad = np.radians(flow_dir_cartesian_deg)
     flow_dir_x = np.cos(flow_dir_rad)
     flow_dir_y = np.sin(flow_dir_rad)
-    
+
     face_idx = 0
     local_z0 = 0
     for block in inlet_blocks:
@@ -457,6 +460,18 @@ def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None,
     inlet_data = read_inlet_face_file(inlet_file)  # Returns (inlet_blocks, mesh_params)
     inlet_blocks, mesh_params = inlet_data
 
+    # Derive u_star from U_ref/z_ref if provided
+    atm = config.atmospheric
+    turb = config.turbulence
+    if atm.U_ref is not None and atm.z_ref is not None:
+        z0_eff = mesh_params.get('z0_eff_atInlet')
+        if z0_eff is None:
+            raise ValueError("z0_eff_atInlet not found in inletFaceInfo.txt; "
+                             "cannot derive u_star from U_ref/z_ref")
+        atm.u_star = atm.U_ref * turb.kappa / np.log(1.0 + atm.z_ref / z0_eff)
+        print(f"Derived u_star={atm.u_star:.4f} m/s from "
+              f"U_ref={atm.U_ref} m/s, z_ref={atm.z_ref} m, z0_eff={z0_eff:.4f} m")
+
     # Calculate z-coordinates from file parameters (not config)
     z_coords = calculate_multiregion_z_distribution(
         mesh_params['avg_inlet_height'],
@@ -781,11 +796,14 @@ def calculate_initial_conditions(config: ABLConfig, z0_mean: Optional[float] = N
     u_mag = (atm.u_star / turb.kappa) * np.log(1.0 + ref_height / z0_value)
     u_mag_scaled = u_mag *vel_scaling
     
-    # Flow direction
-    flow_dir_rad = np.radians(atm.flow_dir_deg)
+    # Flow direction: convert meteorological convention to Cartesian
+    # Met convention: 0=FROM north, 90=FROM east, 180=FROM south, 270=FROM west
+    # Cartesian: angle from +x axis (east)
+    flow_dir_cartesian_deg = (270.0 - atm.wind_dir_met) % 360.0
+    flow_dir_rad = np.radians(flow_dir_cartesian_deg)
     flow_dir_x = np.cos(flow_dir_rad)
     flow_dir_y = np.sin(flow_dir_rad)
-    
+
     flow_velocity = (u_mag_scaled * flow_dir_x, u_mag_scaled * flow_dir_y, 0.0)
     
     # Calculate k at reference height
@@ -914,14 +932,20 @@ def plot_inlet_profiles(z_coords: np.ndarray, U_profiles: np.ndarray,
     
 # Example usage
 if __name__ == "__main__":
-    
-    # Simple usage with defaults
-    config = ABLConfig()
-    
+    from config import ABLConfig, AtmosphericConfig
+
+    # Example 1: specify u_star directly with meteorological wind direction
+    # wind_dir_met=225 means wind FROM southwest (equivalent to old flow_dir_deg=45)
+    config = ABLConfig(atmospheric=AtmosphericConfig(u_star=0.4, wind_dir_met=225.0))
+
+    # Example 2: specify wind speed and reference height instead of u_star
+    # u_star will be derived from U_ref, z_ref, and z0_eff_atInlet in the inlet file
+    # config = ABLConfig(atmospheric=AtmosphericConfig(U_ref=8.0, z_ref=100.0, wind_dir_met=225.0))
+
     case_dir = "/Users/ssudhakaran/Documents/validation/validationMeshCases/zASL"
-    
+
     # Generate using cell centers (default)
     results = generate_inlet_data_workflow(case_dir, config, use_face_centers=True)
-    
+
     # Or generate using internal faces
     # results = generate_inlet_data_workflow(case_dir, config, use_face_centers=False)
