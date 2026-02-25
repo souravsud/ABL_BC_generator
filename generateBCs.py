@@ -95,33 +95,41 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_c
     flow_dir_x = np.cos(flow_dir_rad)
     flow_dir_y = np.sin(flow_dir_rad)
 
+    # Determine a single effective z0 for the inlet profiles.
+    # Using per-block z0 in the log-law would produce different velocity magnitudes
+    # for each inlet column (streaks), so we use one representative value:
+    #   1. User-specified constant z0 (config.atmospheric.z0 != 0)
+    #   2. z0_eff_atInlet from the mesh file (geometric-mean effective roughness)
+    #   3. Arithmetic mean of all inlet-block z0 values as a last resort
+    if config.atmospheric.z0 != 0.0:
+        profile_z0 = config.atmospheric.z0
+        warnings.warn("Using constant surface roughness for inlet profiles. "
+                      "Set z0 to 0 to use z0_eff_atInlet from the mesh file.", UserWarning)
+    elif 'z0_eff_atInlet' in mesh_params:
+        profile_z0 = mesh_params['z0_eff_atInlet']
+        print(f"Using z0_eff_atInlet={profile_z0:.4f} m for inlet profiles (uniform across all blocks)")
+    else:
+        z0_list = [b['z0'] for b in inlet_blocks if 'z0' in b]
+        if not z0_list:
+            warnings.warn("No z0 data found in blocks or mesh params; defaulting profile_z0=0.1", UserWarning)
+            z0_list = [0.1]
+        profile_z0 = float(np.mean(z0_list))
+        print(f"Using mean inlet z0={profile_z0:.4f} m for inlet profiles (uniform across all blocks)")
+
     face_idx = 0
-    local_z0 = 0
     for block in inlet_blocks:
-        
-        if config.atmospheric.z0 == 0.0:
-            if 'z0' in block:
-                local_z0 = block['z0']
-            else:
-                warnings.warn("'z0' not found in block- check inletFaceInfo.txt", UserWarning)
-                return
-        else:
-            warnings.warn("Using constant surface roughness approach. Set z0 to 0 to use roughness maps", UserWarning)
-            local_z0 = config.atmospheric.z0
-        
-        
         for i, z in enumerate(z_coords):
             height = max(z - avg_inlet_height, 0.01)
             
             # Velocity profile
             if height <= atm.h_bl:
-                u_mag = (atm.u_star / turb.kappa) * np.log(1.0 + height / local_z0)
+                u_mag = (atm.u_star / turb.kappa) * np.log(1.0 + height / profile_z0)
             else:
-                u_mag = (atm.u_star / turb.kappa) * np.log(1.0 + atm.h_bl / local_z0)
+                u_mag = (atm.u_star / turb.kappa) * np.log(1.0 + atm.h_bl / profile_z0)
                 
             U_profiles[face_idx] = [u_mag * flow_dir_x, u_mag * flow_dir_y, 0.0]
             
-            # TKE profile  
+            # TKE profile (does not depend on z0)
             if height <= 0.99 * atm.h_bl:
                 ratio = min(height / atm.h_bl, 0.99)
                 k_profiles[face_idx] = (turb.Cmu**(-0.5)) * atm.u_star**2 * (1.0 - ratio)**2
@@ -132,9 +140,9 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_c
             
             # Epsilon profile
             if height <= 0.95 * atm.h_bl:
-                denom = turb.kappa * (height + local_z0)
+                denom = turb.kappa * (height + profile_z0)
             else:
-                denom = turb.kappa * (0.95 * atm.h_bl + local_z0)
+                denom = turb.kappa * (0.95 * atm.h_bl + profile_z0)
                 
             epsilon_profiles[face_idx] = (turb.Cmu**0.75) * (k_profiles[face_idx]**1.5) / max(denom, 1e-6)
             epsilon_profiles[face_idx] = max(epsilon_profiles[face_idx], 1e-8)
