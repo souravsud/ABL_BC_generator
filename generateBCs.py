@@ -950,7 +950,7 @@ if __name__ == "__main__":
     # u_star will be derived from U_ref, z_ref, and z0_eff_atInlet in the inlet file
     # config = ABLConfig(atmospheric=AtmosphericConfig(U_ref=8.0, z_ref=100.0, wind_dir_met=225.0))
 
-    case_dir = "/Users/ssudhakaran/Documents/validation/validationMeshCases/zASL"
+    case_dir = "/case/directory/path"
 
     # Generate using cell centers (default)
     results = generate_inlet_data_workflow(case_dir, config, use_face_centers=True)
