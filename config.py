@@ -7,7 +7,7 @@ class AtmosphericConfig:
     """Atmospheric boundary layer parameters"""
     u_star: float = 0.25              # friction velocity (m/s); overridden if U_ref/z_ref provided
     z0: float = 0.0                   # Surface roughness (m) - uses roughness map if 0
-    h_bl: float = 1500.0             # Boundary layer height (m)
+    h_bl: float = 1500.0             # Boundary layer height (m); set to 0 to use full (un-truncated) Richards & Hoxey log law
     wind_dir_met: float = 225.0      # Meteorological wind direction (degrees):
                                       # 0=FROM north, 90=FROM east, 180=FROM south, 270=FROM west
     U_ref: Optional[float] = None    # Reference wind speed (m/s); if set with z_ref, u_star is derived
