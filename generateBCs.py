@@ -122,7 +122,8 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_c
             height = max(z - avg_inlet_height, 0.01)
             
             # Velocity profile
-            if height <= atm.h_bl:
+            if atm.h_bl < 1e-9 or height <= atm.h_bl:
+                # Full Richards & Hoxey log law (no truncation when h_bl=0)
                 u_mag = (atm.u_star / turb.kappa) * np.log(1.0 + height / profile_z0)
             else:
                 u_mag = (atm.u_star / turb.kappa) * np.log(1.0 + atm.h_bl / profile_z0)
@@ -130,7 +131,10 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_c
             U_profiles[face_idx] = [u_mag * flow_dir_x, u_mag * flow_dir_y, 0.0]
             
             # TKE profile (does not depend on z0)
-            if height <= 0.99 * atm.h_bl:
+            if atm.h_bl < 1e-9:
+                # Full Richards & Hoxey: k = u_star^2 / sqrt(Cmu), constant with height
+                k_profiles[face_idx] = (turb.Cmu**(-0.5)) * atm.u_star**2
+            elif height <= 0.99 * atm.h_bl:
                 ratio = min(height / atm.h_bl, 0.99)
                 k_profiles[face_idx] = (turb.Cmu**(-0.5)) * atm.u_star**2 * (1.0 - ratio)**2
             else:
@@ -139,7 +143,10 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_c
             k_profiles[face_idx] = max(k_profiles[face_idx], 1e-6)
             
             # Epsilon profile
-            if height <= 0.95 * atm.h_bl:
+            if atm.h_bl < 1e-9:
+                # Full Richards & Hoxey: epsilon = u_star^3 / (kappa * (z + z0)), no truncation
+                denom = turb.kappa * (height + profile_z0)
+            elif height <= 0.95 * atm.h_bl:
                 denom = turb.kappa * (height + profile_z0)
             else:
                 denom = turb.kappa * (0.95 * atm.h_bl + profile_z0)
@@ -815,7 +822,10 @@ def calculate_initial_conditions(config: ABLConfig, z0_mean: Optional[float] = N
     flow_velocity = (u_mag_scaled * flow_dir_x, u_mag_scaled * flow_dir_y, 0.0)
     
     # Calculate k at reference height
-    if ref_height <= 0.99 * atm.h_bl:
+    if atm.h_bl < 1e-9:
+        # Full Richards & Hoxey: k = u_star^2 / sqrt(Cmu), constant with height
+        k_val = (turb.Cmu**(-0.5)) * atm.u_star**2
+    elif ref_height <= 0.99 * atm.h_bl:
         ratio = min(ref_height / atm.h_bl, 0.99)
         k_val = (turb.Cmu**(-0.5)) * atm.u_star**2 * (1.0 - ratio)**2
     else:
@@ -824,7 +834,10 @@ def calculate_initial_conditions(config: ABLConfig, z0_mean: Optional[float] = N
     k_val = max(k_val, 1e-6)
     
     # Calculate epsilon at reference height using mean/config z0
-    if ref_height <= 0.95 * atm.h_bl:
+    if atm.h_bl < 1e-9:
+        # Full Richards & Hoxey: epsilon = u_star^3 / (kappa * (z + z0)), no truncation
+        denom = turb.kappa * (ref_height + z0_value)
+    elif ref_height <= 0.95 * atm.h_bl:
         denom = turb.kappa * (ref_height + z0_value)
     else:
         denom = turb.kappa * (0.95 * atm.h_bl + z0_value)
@@ -902,7 +915,7 @@ def plot_inlet_profiles(z_coords: np.ndarray, U_profiles: np.ndarray,
     ax1.legend()
     
     # Add reference lines
-    if hasattr(config.atmospheric, 'h_bl'):
+    if hasattr(config.atmospheric, 'h_bl') and config.atmospheric.h_bl > 0:
         ax1.axhline(y=config.atmospheric.h_bl, color='r', linestyle='--', 
                 alpha=0.7, label=f'BL height ({config.atmospheric.h_bl}m)')
     
@@ -914,7 +927,7 @@ def plot_inlet_profiles(z_coords: np.ndarray, U_profiles: np.ndarray,
     ax2.grid(True, alpha=0.3)
     ax2.legend()
     
-    if hasattr(config.atmospheric, 'h_bl'):
+    if hasattr(config.atmospheric, 'h_bl') and config.atmospheric.h_bl > 0:
         ax2.axhline(y=config.atmospheric.h_bl, color='r', linestyle='--', 
                 alpha=0.7, label=f'BL height ({config.atmospheric.h_bl}m)')
     
@@ -926,7 +939,7 @@ def plot_inlet_profiles(z_coords: np.ndarray, U_profiles: np.ndarray,
     ax3.grid(True, alpha=0.3)
     ax3.legend()
     
-    if hasattr(config.atmospheric, 'h_bl'):
+    if hasattr(config.atmospheric, 'h_bl') and config.atmospheric.h_bl > 0:
         ax3.axhline(y=config.atmospheric.h_bl, color='r', linestyle='--', 
                 alpha=0.7, label=f'BL height ({config.atmospheric.h_bl}m)')
     
