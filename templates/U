@@ -1,0 +1,57 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  {{ foam_version }}                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     {{ version }};
+    format      ascii;
+    class       volVectorField;
+    object      U;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 1 -1 0 0 0 0];
+
+internalField   uniform ({{ "%.3f" | format(flow_velocity[0]) }} {{ "%.3f" | format(flow_velocity[1]) }} {{ "%.3f" | format(flow_velocity[2]) }});
+
+boundaryField
+{
+    {{ patches.inlet }}
+    {
+        type            fixedValue;
+        value           nonuniform
+        #include        "include/inletU"
+        ;
+    }
+    
+    {{ patches.outlet }}
+    {
+        type            {{ bc_U.outlet.type }};
+    }
+    
+    {{ patches.ground }}
+    {
+        type             {{ bc_U.ground.type }};
+    }
+    
+    {{ patches.sky }}
+    {
+        type             {{ bc_U.sky.type }};
+    }
+    
+    {{ patches.sides }}
+    {
+        type             {{ bc_U.sides.type }};
+    }
+    
+    "proc.*"
+    {
+        type            processor;
+    }
+}
+
+// ************************************************************************* //

@@ -1,0 +1,60 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  {{ foam_version }}                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     {{ version }};
+    format      ascii;
+    class       volScalarField;
+    location    "0";
+    object      nut;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 2 -1 0 0 0 0];
+
+internalField   uniform 0;
+
+boundaryField
+{
+    {{ patches.inlet }}
+    {
+        type            calculated;
+        value           uniform 0;
+    }
+    
+    {{ patches.outlet }}
+    {
+        type            calculated;
+        value           uniform 0;
+    }
+    
+    {{ patches.ground }}
+    {
+        type            {{ wf_ground_nut.type }};
+        z0              {{ z0_specification }}
+        value           uniform {{ wf_ground_nut.value }};
+    }
+    
+    {{ patches.sky }}
+    {
+        type            {{ bc_nut.sky.type }};
+    }
+    
+    {{ patches.sides }}
+    {
+        type            calculated;
+        value           uniform 0;
+    }
+    
+    "proc.*"
+    {
+        type            processor;
+    }
+}
+
+// ************************************************************************* //
