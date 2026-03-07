@@ -194,7 +194,7 @@ def generate_boundary_condition_files(case_dir: str, config: ABLConfig, initial_
     zero_dir.mkdir(exist_ok=True)
 
     # Set up Jinja2 template environment
-    templates_dir = Path(__file__).parent / 'templates'
+    templates_dir = Path(__file__).parent / 'BCtemplates'
     env = Environment(loader=FileSystemLoader(str(templates_dir)), keep_trailing_newline=True)
 
     patches = config.mesh.patch_names
