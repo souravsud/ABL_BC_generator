@@ -720,7 +720,18 @@ def plot_inlet_profiles(z_coords: np.ndarray, U_profiles: np.ndarray,
     
 # Example usage
 if __name__ == "__main__":
+    import argparse
     from config import ABLConfig, AtmosphericConfig
+
+    parser = argparse.ArgumentParser(description="Generate ABL boundary conditions for an OpenFOAM case.")
+    parser.add_argument("case_dir", help="Path to the OpenFOAM case directory")
+    parser.add_argument(
+        "--use-face-centers",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use cell face centers for profile evaluation (default: True); pass --no-use-face-centers to use internal faces"
+    )
+    args = parser.parse_args()
 
     # Example 1: specify u_star directly with meteorological wind direction
     # wind_dir_met=225 means wind FROM southwest (equivalent to old flow_dir_deg=45)
@@ -730,10 +741,5 @@ if __name__ == "__main__":
     # u_star will be derived from U_ref, z_ref, and z0_eff_atInlet in the inlet file
     # config = ABLConfig(atmospheric=AtmosphericConfig(U_ref=8.0, z_ref=100.0, wind_dir_met=225.0))
 
-    case_dir = "/home/sourav/2_fix_OF_setup/generateInputs/Data/downloads/terrain_0001_N39_711_W007_735/rotatedTerrain_225_deg"
-
-    # Generate using cell centers (default)
-    results = generate_inlet_data_workflow(case_dir, config, use_face_centers=True)
-
-    # Or generate using internal faces
-    # results = generate_inlet_data_workflow(case_dir, config, use_face_centers=False)
+    # Generate using cell face centers (default); pass --no-use-face-centers for internal faces
+    results = generate_inlet_data_workflow(args.case_dir, config, use_face_centers=args.use_face_centers)
