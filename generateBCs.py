@@ -630,7 +630,7 @@ def write_initial_conditions_file(case_dir: str, config: ABLConfig, initial_vals
     include_dir = Path(case_dir) / '0' / 'include'
     include_dir.mkdir(parents=True, exist_ok=True)
 
-    templates_dir = Path(__file__).parent / 'templates'
+    templates_dir = Path(__file__).parent / 'BCtemplates'
     env = Environment(loader=FileSystemLoader(str(templates_dir)), keep_trailing_newline=True)
 
     content = env.get_template('initialConditions').render(
