@@ -5,6 +5,7 @@ from config import ABLConfig
 import os
 import warnings
 import matplotlib.pyplot as plt
+from jinja2 import Environment, FileSystemLoader
 
 def calculate_graded_z_distribution(z_ground: float, z_top: float, n_cells: int, 
                                   expansion_ratio: float, use_face_centers: bool = True) -> np.ndarray:
@@ -191,274 +192,45 @@ def generate_boundary_condition_files(case_dir: str, config: ABLConfig, initial_
     """Generate boundary condition files that read from data files"""
     zero_dir = Path(case_dir) / '0'
     zero_dir.mkdir(exist_ok=True)
-    
+
+    # Set up Jinja2 template environment
+    templates_dir = Path(__file__).parent / 'BCtemplates'
+    env = Environment(loader=FileSystemLoader(str(templates_dir)), keep_trailing_newline=True)
+
     patches = config.mesh.patch_names
-    foam_version = config.openfoam.foam_version
-    
+    bc = config.openfoam.boundary_conditions
+    wf = config.openfoam.wall_functions
+
     if config.atmospheric.z0 == 0.0:
-        z0_specification =f"""#include "include/z0Values";"""
+        z0_specification = '#include "include/z0Values";'
     else:
-        z0_specification =f"""uniform {config.atmospheric.z0};"""
-    
-    # U boundary condition file
-    u_content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
-| =========                 |                                                 |
-| \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\\\    /   O peration     | Version:  {foam_version}                                 |
-|   \\\\  /    A nd           | Website:  www.openfoam.com                      |
-|    \\\\/     M anipulation  |                                                 |
-\\*---------------------------------------------------------------------------*/
-FoamFile
-{{
-    version     {config.openfoam.version};
-    format      ascii;
-    class       volVectorField;
-    object      U;
-}}
-// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+        z0_specification = f'uniform {config.atmospheric.z0};'
 
-dimensions      [0 1 -1 0 0 0 0];
+    # Shared context for all templates
+    common_ctx = {
+        'foam_version': config.openfoam.foam_version,
+        'version': config.openfoam.version,
+        'patches': patches,
+        'z0_specification': z0_specification,
+        'wf_ground_k': wf['ground_k'],
+        'wf_ground_epsilon': wf['ground_epsilon'],
+        'wf_ground_nut': wf['ground_nut'],
+        'bc_U': bc['U'],
+        'bc_k': bc['k'],
+        'bc_epsilon': bc['epsilon'],
+        'bc_nut': bc['nut'],
+        'flow_velocity': initial_vals['flowVelocity'],
+        'turbulent_ke': initial_vals['turbulentKE'],
+        'turbulent_epsilon': initial_vals['turbulentEpsilon'],
+    }
 
-internalField   uniform ({initial_vals['flowVelocity'][0]:.3f} {initial_vals['flowVelocity'][1]:.3f} {initial_vals['flowVelocity'][2]:.3f});
+    # Render and write each boundary condition file
+    for name in ('U', 'k', 'epsilon', 'nut'):
+        content = env.get_template(name).render(**common_ctx)
+        with open(zero_dir / name, 'w') as f:
+            f.write(content)
 
-boundaryField
-{{
-    {patches['inlet']}
-    {{
-        type            fixedValue;
-        value           nonuniform
-        #include        "include/inletU"
-        ;
-    }}
-    
-    {patches['outlet']}
-    {{
-        type            {config.openfoam.boundary_conditions['U']['outlet']['type']};
-    }}
-    
-    {patches['ground']}
-    {{
-        type             {config.openfoam.boundary_conditions['U']['ground']['type']};
-    }}
-    
-    {patches['sky']}
-    {{
-        type             {config.openfoam.boundary_conditions['U']['sky']['type']};
-    }}
-    
-    {patches['sides']}
-    {{
-        type             {config.openfoam.boundary_conditions['U']['sides']['type']};
-    }}
-    
-    "proc.*"
-    {{
-        type            processor;
-    }}
-}}
 
-// ************************************************************************* //
-"""
-    
-    # k boundary condition file
-    k_content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
-| =========                 |                                                 |
-| \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\\\    /   O peration     | Version:  {foam_version}                                 |
-|   \\\\  /    A nd           | Website:  www.openfoam.com                      |
-|    \\\\/     M anipulation  |                                                 |
-\\*---------------------------------------------------------------------------*/
-FoamFile
-{{
-    version     {config.openfoam.version};
-    format      ascii;
-    class       volScalarField;
-    object      k;
-}}
-// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
-
-dimensions      [0 2 -2 0 0 0 0];
-
-internalField   uniform {initial_vals['turbulentKE']:.6f};
-
-boundaryField
-{{
-    {patches['inlet']}
-    {{
-        type            fixedValue;
-        value           nonuniform
-        #include        "include/inletK"
-        ;
-    }}
-    
-    {patches['outlet']}
-    {{
-        type            {config.openfoam.boundary_conditions['k']['outlet']['type']};
-    }}
-    
-    {patches['ground']}
-    {{
-        type            {config.openfoam.wall_functions['ground_k']['type']};
-        value           uniform {config.openfoam.wall_functions['ground_k']['value']};
-    }}
-    
-    {patches['sky']}
-    {{
-        type            {config.openfoam.boundary_conditions['k']['sky']['type']};
-    }}
-    
-    {patches['sides']}
-    {{
-        type            {config.openfoam.boundary_conditions['k']['sides']['type']};
-    }}
-    
-    "proc.*"
-    {{
-        type            processor;
-    }}
-}}
-
-// ************************************************************************* //
-"""
-
-    # epsilon boundary condition file
-    eps_wall = config.openfoam.wall_functions['ground_epsilon']
-    epsilon_content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
-| =========                 |                                                 |
-| \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\\\    /   O peration     | Version:  {foam_version}                                 |
-|   \\\\  /    A nd           | Website:  www.openfoam.com                      |
-|    \\\\/     M anipulation  |                                                 |
-\\*---------------------------------------------------------------------------*/
-FoamFile
-{{
-    version     {config.openfoam.version};
-    format      ascii;
-    class       volScalarField;
-    object      epsilon;
-}}
-// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
-
-dimensions      [0 2 -3 0 0 0 0];
-
-internalField   uniform {initial_vals['turbulentEpsilon']:.8f};
-
-boundaryField
-{{
-    {patches['inlet']}
-    {{
-        type            fixedValue;
-        value           nonuniform
-        #include        "include/inletEpsilon"
-        ;
-    }}
-    
-    {patches['outlet']}
-    {{
-        type            {config.openfoam.boundary_conditions['epsilon']['outlet']['type']};
-    }}
-    
-    {patches['ground']}
-    {{
-        type            {eps_wall['type']};
-        z0              {z0_specification}
-        value           uniform {eps_wall['value']};
-    }}
-    
-    {patches['sky']}
-    {{
-        type            {config.openfoam.boundary_conditions['epsilon']['sky']['type']};
-    }}
-    
-    {patches['sides']}
-    {{
-        type            {config.openfoam.boundary_conditions['epsilon']['sides']['type']};
-    }}
-    
-    "proc.*"
-    {{
-        type            processor;
-    }}
-}}
-
-// ************************************************************************* //
-"""
-
-    # nut boundary condition file
-    nut_content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
-| =========                 |                                                 |
-| \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\\\    /   O peration     | Version:  {foam_version}                                 |
-|   \\\\  /    A nd           | Website:  www.openfoam.com                      |
-|    \\\\/     M anipulation  |                                                 |
-\\*---------------------------------------------------------------------------*/
-FoamFile
-{{
-    version     {config.openfoam.version};
-    format      ascii;
-    class       volScalarField;
-    location    "0";
-    object      nut;
-}}
-// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
-
-dimensions      [0 2 -1 0 0 0 0];
-
-internalField   uniform 0;
-
-boundaryField
-{{
-    {patches['inlet']}
-    {{
-        type            calculated;
-        value           uniform 0;
-    }}
-    
-    {patches['outlet']}
-    {{
-        type            calculated;
-        value           uniform 0;
-    }}
-    
-    {patches['ground']}
-    {{
-        type            {config.openfoam.wall_functions['ground_nut']['type']};
-        z0              {z0_specification}
-        value           uniform {config.openfoam.wall_functions['ground_k']['value']};
-    }}
-    
-    {patches['sky']}
-    {{
-        type            {config.openfoam.boundary_conditions['nut']['sky']['type']};
-    }}
-    
-    {patches['sides']}
-    {{
-        type            calculated;
-        value           uniform 0;
-    }}
-    
-    "proc.*"
-    {{
-        type            processor;
-    }}
-}}
-
-// ************************************************************************* //
-"""
-    
-    # Write the files
-    with open(zero_dir / 'U', 'w') as f:
-        f.write(u_content)
-        
-    with open(zero_dir / 'k', 'w') as f:
-        f.write(k_content)
-        
-    with open(zero_dir / 'epsilon', 'w') as f:
-        f.write(epsilon_content)
-    
-    with open(zero_dir / 'nut', 'w') as f:
-        f.write(nut_content)
 
 
 def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None, 
@@ -857,26 +629,21 @@ def write_initial_conditions_file(case_dir: str, config: ABLConfig, initial_vals
     """Write initialConditions file based on inlet profile equations"""
     include_dir = Path(case_dir) / '0' / 'include'
     include_dir.mkdir(parents=True, exist_ok=True)
-    
-    
-    
-    content = f"""/*--------------------------------*- C++ -*----------------------------------*\\
-========= |
-\\\\ / F ield | OpenFOAM: The Open Source CFD Toolbox
-\\\\ / O peration | Website: https://openfoam.org
-\\\\ / A nd | Version: 12
-\\\\/ M anipulation |
-\\*---------------------------------------------------------------------------*/
-flowVelocity ({initial_vals['flowVelocity'][0]:.3f} {initial_vals['flowVelocity'][1]:.3f} {initial_vals['flowVelocity'][2]:.3f});
-pressure {initial_vals['pressure']};
-turbulentKE {initial_vals['turbulentKE']:.6f};
-turbulentEpsilon {initial_vals['turbulentEpsilon']:.8f};
-// ************************************************************************* //
-"""
-    
+
+    templates_dir = Path(__file__).parent / 'BCtemplates'
+    env = Environment(loader=FileSystemLoader(str(templates_dir)), keep_trailing_newline=True)
+
+    content = env.get_template('initialConditions').render(
+        foam_version=config.openfoam.foam_version,
+        flow_velocity=initial_vals['flowVelocity'],
+        pressure=initial_vals['pressure'],
+        turbulent_ke=initial_vals['turbulentKE'],
+        turbulent_epsilon=initial_vals['turbulentEpsilon'],
+    )
+
     with open(include_dir / 'initialConditions', 'w') as f:
         f.write(content)
-    
+
     print(f"Generated initialConditions file with:")
     print(f"  flowVelocity: {initial_vals['flowVelocity']}")
     print(f"  turbulentKE: {initial_vals['turbulentKE']:.6f}")
@@ -963,7 +730,7 @@ if __name__ == "__main__":
     # u_star will be derived from U_ref, z_ref, and z0_eff_atInlet in the inlet file
     # config = ABLConfig(atmospheric=AtmosphericConfig(U_ref=8.0, z_ref=100.0, wind_dir_met=225.0))
 
-    case_dir = "/case/directory/path"
+    case_dir = "/home/sourav/2_fix_OF_setup/generateInputs/Data/downloads/terrain_0001_N39_711_W007_735/rotatedTerrain_225_deg"
 
     # Generate using cell centers (default)
     results = generate_inlet_data_workflow(case_dir, config, use_face_centers=True)

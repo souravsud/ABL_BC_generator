@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, Optional
 
 
@@ -40,8 +40,8 @@ class MeshConfig:
 @dataclass
 class OpenFOAMConfig:
     """OpenFOAM file generation settings"""
-    version: str = "2.0"
-    foam_version: str = "v12"
+    version: str = "1.0"
+    foam_version: str = "v2512"
     wall_functions: Dict[str, Dict] = None
     boundary_conditions: Dict[str, Dict[str, Dict]] = None
     
