@@ -634,6 +634,7 @@ def write_initial_conditions_file(case_dir: str, config: ABLConfig, initial_vals
     env = Environment(loader=FileSystemLoader(str(templates_dir)), keep_trailing_newline=True)
 
     content = env.get_template('initialConditions').render(
+        foam_version=config.openfoam.foam_version,
         flow_velocity=initial_vals['flowVelocity'],
         pressure=initial_vals['pressure'],
         turbulent_ke=initial_vals['turbulentKE'],
@@ -729,7 +730,7 @@ if __name__ == "__main__":
     # u_star will be derived from U_ref, z_ref, and z0_eff_atInlet in the inlet file
     # config = ABLConfig(atmospheric=AtmosphericConfig(U_ref=8.0, z_ref=100.0, wind_dir_met=225.0))
 
-    case_dir = "/case/directory/path"
+    case_dir = "/home/sourav/2_fix_OF_setup/generateInputs/Data/downloads/terrain_0001_N39_711_W007_735/rotatedTerrain_225_deg"
 
     # Generate using cell centers (default)
     results = generate_inlet_data_workflow(case_dir, config, use_face_centers=True)
