@@ -27,7 +27,7 @@ Before running the generator, your OpenFOAM case directory must contain the inle
         └── inletFaceInfo.txt   ← required input
 ```
 
-`inletFaceInfo.txt` is produced by a separate mesh pre-processing step. It contains:
+This is tool was intended to be used with the terrain following mesh tool [terrain_following_mesh_generator](https://github.com/souravsud/terrain_following_mesh_generator). The `inletFaceInfo.txt` is produced by a mesh pre-processing step in the mentioned repo . It contains:
 
 - **Mesh parameters** (`domain_height`, `total_z_cells`, `z_grading`, `avg_inlet_height`, `first_cell_height`, `z0_eff_atInlet`, …)
 - **Face data** — one row per inlet column with `block_i, block_j, x_ground, y_ground, z_ground[, z0]`
@@ -167,5 +167,9 @@ An optional plot (`inlet_profiles.png`) is also saved in `<case_dir>/` when `--p
 
 ## Sample Output Profiles
 
-<!-- Paste your sample profile images or data here -->
+Untruncated  profiles (h_bl = 0):
+<img width="4467" height="1768" alt="inlet_profiles" src="https://github.com/user-attachments/assets/1d6c0d6a-4186-4acc-a986-d333a33f8723" />
+
+Truncated profiles (h_bl = 1500):
+<img width="4464" height="1768" alt="inlet_profiles" src="https://github.com/user-attachments/assets/c652587a-fd8d-49f6-8724-8a19c866e26d" />
 
