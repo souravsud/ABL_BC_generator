@@ -1,11 +1,12 @@
 import numpy as np
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Optional
 from config import ABLConfig
 import os
 import warnings
 import matplotlib.pyplot as plt
 from jinja2 import Environment, FileSystemLoader
+import logging
 
 def calculate_graded_z_distribution(z_ground: float, z_top: float, n_cells: int, 
                                   expansion_ratio: float, use_face_centers: bool = True) -> np.ndarray:
@@ -81,8 +82,8 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_c
     
     # Generate profiles for each block x each z-level
     total_faces = len(inlet_blocks) * len(z_coords)
-    print("Inlet blocks found:", len(inlet_blocks), "with", len(z_coords), "z-levels each.")
-    print(f"Calculating profiles for {total_faces} inlet faces...")
+    logging.debug(f"Inlet blocks found: {len(inlet_blocks)} with {len(z_coords)} z-levels each." )
+    logging.debug(f"Calculating profiles for {total_faces} inlet faces...")
     
     U_profiles = np.zeros((total_faces, 3))
     k_profiles = np.zeros(total_faces)
@@ -108,14 +109,14 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_c
                       "Set z0 to 0 to use z0_eff_atInlet from the mesh file.", UserWarning)
     elif 'z0_eff_atInlet' in mesh_params:
         profile_z0 = mesh_params['z0_eff_atInlet']
-        print(f"Using z0_eff_atInlet={profile_z0:.4f} m for inlet profiles (uniform across all blocks)")
+        logging.debug(f"Using z0_eff_atInlet={profile_z0:.4f} m for inlet profiles (uniform across all blocks)")
     else:
         z0_list = [b['z0'] for b in inlet_blocks if 'z0' in b]
         if not z0_list:
             warnings.warn("No z0 data found in blocks or mesh params; defaulting profile_z0=0.1", UserWarning)
             z0_list = [0.1]
         profile_z0 = float(np.mean(z0_list))
-        print(f"Using mean inlet z0={profile_z0:.4f} m for inlet profiles (uniform across all blocks)")
+        logging.debug(f"Using mean inlet z0={profile_z0:.4f} m for inlet profiles (uniform across all blocks)")
 
     face_idx = 0
     for block in inlet_blocks:
@@ -234,11 +235,15 @@ def generate_boundary_condition_files(case_dir: str, config: ABLConfig, initial_
 
 
 def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None, 
-                               use_face_centers: bool = True, plot_profiles: bool = True):
+                               use_face_centers: bool = True, plot_profiles: bool = True, verbose: bool = False):
     """
     Complete workflow for mesh-based ABL inlet data generation
     Now reads mesh parameters from inlet face file instead of config
     """
+    level = logging.DEBUG if verbose else logging.WARNING
+    logging.basicConfig(level=level, format='%(levelname)s: %(message)s')
+    logging.captureWarnings(True)
+
     if config is None:
         config = ABLConfig()
     
@@ -256,7 +261,7 @@ def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None,
             raise ValueError("z0_eff_atInlet not found in inletFaceInfo.txt; "
                              "cannot derive u_star from U_ref/z_ref")
         atm.u_star = atm.U_ref * turb.kappa / np.log(1.0 + atm.z_ref / z0_eff)
-        print(f"Derived u_star={atm.u_star:.4f} m/s from "
+        logging.info(f"Derived u_star={atm.u_star:.4f} m/s from "
               f"U_ref={atm.U_ref} m/s, z_ref={atm.z_ref} m, z0_eff={z0_eff:.4f} m")
 
     # Calculate z-coordinates from file parameters (not config)
@@ -272,7 +277,7 @@ def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None,
     if inlet_blocks and 'z0' in inlet_blocks[0]:
         z0_values = [block['z0'] for block in inlet_blocks]
         z0_mean = np.mean(z0_values)
-        print(f"Mean inlet z0: {z0_mean:.4f} m (from {len(z0_values)} blocks)")
+        logging.info(f"Mean inlet z0: {z0_mean:.4f} m (from {len(z0_values)} blocks)")
         
     initial_vals = calculate_initial_conditions(config, z0_mean=z0_mean)
 
@@ -432,7 +437,7 @@ def read_inlet_face_file(file_path):
     inlet_blocks = []
     mesh_params = {}
     
-    print("Reading inlet face information from:", file_path)
+    logging.debug(f"Reading inlet face information from: {file_path}")
     
     with open(file_path, 'r') as f:
         lines = f.readlines()
@@ -491,17 +496,17 @@ def read_inlet_face_file(file_path):
                 
                 inlet_blocks.append(inlet_block)
     
-    print(f"Read {len(inlet_blocks)} inlet blocks and mesh parameters:")
+    logging.debug(f"Read {len(inlet_blocks)} inlet blocks and mesh parameters:")
     for key, value in mesh_params.items():
-        print(f"  {key}: {value}")
+        logging.debug(f"  {key}: {value}")
     
     # Check if z0 data was included
     has_z0 = 'z0' in inlet_blocks[0] if inlet_blocks else False
     if has_z0:
         z0_values = [block['z0'] for block in inlet_blocks]
-        print(f"  z0 data included: min={min(z0_values):.4f}, max={max(z0_values):.4f}, mean={np.mean(z0_values):.4f}")
+        logging.debug(f"  z0 data included: min={min(z0_values):.4f}, max={max(z0_values):.4f}, mean={np.mean(z0_values):.4f}")
     else:
-        print("  WARNING: No z0 data found, will use uniform z0 from config")
+        warnings.warn("  No z0 data found, will use uniform z0 from config", UserWarning)
     
     return inlet_blocks, mesh_params
 
@@ -569,9 +574,9 @@ def calculate_initial_conditions(config: ABLConfig, z0_mean: Optional[float] = N
     z0_value = z0_mean if z0_mean is not None else atm.z0
     
     if z0_mean is not None:
-        print(f"Using mean z0={z0_mean:.4f} for initial conditions")
+        logging.debug(f"Using mean z0={z0_mean:.4f} for initial conditions")
     else:
-        print(f"Using config z0={atm.z0:.4f} for initial conditions")
+        logging.debug(f"Using config z0={atm.z0:.4f} for initial conditions")
     
     ref_height = 800 
     vel_scaling = 0.25
@@ -644,10 +649,10 @@ def write_initial_conditions_file(case_dir: str, config: ABLConfig, initial_vals
     with open(include_dir / 'initialConditions', 'w') as f:
         f.write(content)
 
-    print(f"Generated initialConditions file with:")
-    print(f"  flowVelocity: {initial_vals['flowVelocity']}")
-    print(f"  turbulentKE: {initial_vals['turbulentKE']:.6f}")
-    print(f"  turbulentEpsilon: {initial_vals['turbulentEpsilon']:.8f}")
+    logging.debug("Generated initialConditions file with:")
+    logging.debug(f"  flowVelocity: {initial_vals['flowVelocity']}")
+    logging.debug(f"  turbulentKE: {initial_vals['turbulentKE']:.6f}")
+    logging.debug(f"  turbulentEpsilon: {initial_vals['turbulentEpsilon']:.8f}")
 
 def plot_inlet_profiles(z_coords: np.ndarray, U_profiles: np.ndarray, 
                     k_profiles: np.ndarray, epsilon_profiles: np.ndarray,
@@ -716,30 +721,41 @@ def plot_inlet_profiles(z_coords: np.ndarray, U_profiles: np.ndarray,
     if save_dir:
         save_path = Path(save_dir) / 'inlet_profiles.png'
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print(f"Plot saved to: {save_path}")
+        logging.debug(f"Plot saved to: {save_path}")
     
 # Example usage
 if __name__ == "__main__":
     import argparse
-    from config import ABLConfig, AtmosphericConfig
+    from config import ABLConfig
 
     parser = argparse.ArgumentParser(description="Generate ABL boundary conditions for an OpenFOAM case.")
     parser.add_argument("case_dir", help="Path to the OpenFOAM case directory")
     parser.add_argument(
-        "--use-face-centers",
+        "--plot",
+        dest="plot_profiles",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Use cell face centers for profile evaluation (default: True); pass --no-use-face-centers to use internal faces"
+        help="Generate inlet profile plots (default: enabled). Use --no-plot to disable.",
+    )
+    parser.add_argument(
+        "--verbose",
+        dest="verbose",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable verbose logging (default: disabled). Use --verbose to enable.",
     )
     args = parser.parse_args()
 
-    # Example 1: specify u_star directly with meteorological wind direction
-    # wind_dir_met=225 means wind FROM southwest (equivalent to old flow_dir_deg=45)
-    config = ABLConfig(atmospheric=AtmosphericConfig(u_star=0.4, wind_dir_met=225.0))
+    config = ABLConfig()
 
-    # Example 2: specify wind speed and reference height instead of u_star
+    # Example: specify wind speed and reference height
     # u_star will be derived from U_ref, z_ref, and z0_eff_atInlet in the inlet file
     # config = ABLConfig(atmospheric=AtmosphericConfig(U_ref=8.0, z_ref=100.0, wind_dir_met=225.0))
 
     # Generate using cell face centers (default); pass --no-use-face-centers for internal faces
-    results = generate_inlet_data_workflow(args.case_dir, config, use_face_centers=args.use_face_centers)
+    results = generate_inlet_data_workflow(
+        args.case_dir,
+        config,
+        plot_profiles=args.plot_profiles,
+        verbose=args.verbose
+    )
