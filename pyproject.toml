@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "abl-bc-generator"
+version = "1.0.0"
+description = "Generate OpenFOAM boundary condition files for Atmospheric Boundary Layer (ABL) simulations"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+dependencies = [
+    "jinja2>=3.0,<4.0",
+    "matplotlib>=3.0",
+    "numpy>=1.20",
+]
+
+[project.scripts]
+abl-bc-generator = "abl_bc_generator.generate:_cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["abl_bc_generator*"]
+
+[tool.setuptools.package-data]
+abl_bc_generator = ["BCtemplates/*"]

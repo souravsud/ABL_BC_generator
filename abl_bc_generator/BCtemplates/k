@@ -1,0 +1,58 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  {{ foam_version }}                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     {{ version }};
+    format      ascii;
+    class       volScalarField;
+    object      k;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 2 -2 0 0 0 0];
+
+internalField   uniform {{ "%.6f" | format(turbulent_ke) }};
+
+boundaryField
+{
+    {{ patches.inlet }}
+    {
+        type            fixedValue;
+        value           nonuniform
+        #include        "include/inletK"
+        ;
+    }
+    
+    {{ patches.outlet }}
+    {
+        type            {{ bc_k.outlet.type }};
+    }
+    
+    {{ patches.ground }}
+    {
+        type            {{ wf_ground_k.type }};
+        value           uniform {{ wf_ground_k.value }};
+    }
+    
+    {{ patches.sky }}
+    {
+        type            {{ bc_k.sky.type }};
+    }
+    
+    {{ patches.sides }}
+    {
+        type            {{ bc_k.sides.type }};
+    }
+    
+    "proc.*"
+    {
+        type            processor;
+    }
+}
+
+// ************************************************************************* //

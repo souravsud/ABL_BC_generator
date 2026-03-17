@@ -1,0 +1,12 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  {{ foam_version }}                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+flowVelocity ({{ "%.3f" | format(flow_velocity[0]) }} {{ "%.3f" | format(flow_velocity[1]) }} {{ "%.3f" | format(flow_velocity[2]) }});
+pressure {{ pressure }};
+turbulentKE {{ "%.6f" | format(turbulent_ke) }};
+turbulentEpsilon {{ "%.8f" | format(turbulent_epsilon) }};
+// ************************************************************************* //
