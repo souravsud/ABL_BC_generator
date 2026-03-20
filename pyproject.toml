@@ -15,9 +15,6 @@ dependencies = [
     "numpy>=1.20",
 ]
 
-[project.scripts]
-abl-bc-generator = "abl_bc_generator.__main__:main"
-
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["abl_bc_generator*"]

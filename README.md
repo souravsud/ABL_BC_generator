@@ -14,8 +14,7 @@ Install the package (and all Python dependencies) directly from the repository:
 pip install .
 ```
 
-This makes the `abl_bc_generator` Python package importable from anywhere and
-registers the `abl-bc-generator` command-line script.
+This makes the `abl_bc_generator` Python package importable from anywhere.
 
 For a development / editable install (changes to the source are reflected
 immediately without reinstalling):
@@ -45,33 +44,6 @@ This is tool was intended to be used with the terrain following mesh tool [terra
 ---
 
 ## Usage
-
-### Command-line
-
-After `pip install .` the `abl-bc-generator` script is available:
-
-```bash
-abl-bc-generator /path/to/my/openfoam/case
-```
-
-You can also run via the module directly:
-
-```bash
-python -m abl_bc_generator /path/to/my/openfoam/case
-```
-
-Both commands accept the same flags:
-
-```bash
-abl-bc-generator /path/to/case --no-plot    # disable profile plot
-abl-bc-generator /path/to/case --verbose    # enable verbose logging
-```
-
-> **Note:** The CLI uses a default `ABLConfig()`. For custom atmospheric
-> parameters (e.g. a specific `u_star`, `wind_dir_met`, or `U_ref`/`z_ref`),
-> use the Python API shown below.
-
-### Python API — custom configuration
 
 After `pip install .` you can import directly from the `abl_bc_generator` package:
 
@@ -176,7 +148,7 @@ After a successful run the following files are written inside your case director
         └── initialConditions
 ```
 
-An optional plot (`inlet_profiles.png`) is also saved in `<case_dir>/` when `--plot` is active (the default).
+An optional plot (`inlet_profiles.png`) is also saved in `<case_dir>/` when `plot_profiles=True` (the default).
 
 ---
 
