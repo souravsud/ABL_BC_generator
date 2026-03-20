@@ -1,7 +1,7 @@
 import numpy as np
 from pathlib import Path
 from typing import Optional
-from config import ABLConfig
+from .config import ABLConfig
 import os
 import warnings
 import matplotlib.pyplot as plt
@@ -582,11 +582,11 @@ def calculate_initial_conditions(config: ABLConfig, z0_mean: Optional[float] = N
     vel_scaling = 0.25
     #instead of initialising the field to zero value- here we try to compute an initial value based on inlet condition
     #the values at 800m altitude is then scaled down to be used as the initial values 
-    #(this scaling down is necessory since velocity will be almost max at this height and at lower height turb quantities will be very high)
+    #(this scaling down is necessary since velocity will be almost max at this height and at lower height turb quantities will be very high)
     
     # Calculate velocity at reference height using mean/config z0
     u_mag = (atm.u_star / turb.kappa) * np.log(1.0 + ref_height / z0_value)
-    u_mag_scaled = u_mag *vel_scaling
+    u_mag_scaled = u_mag * vel_scaling
     
     # Flow direction: convert meteorological convention to Cartesian
     # Met convention: 0=FROM north, 90=FROM east, 180=FROM south, 270=FROM west
@@ -722,40 +722,4 @@ def plot_inlet_profiles(z_coords: np.ndarray, U_profiles: np.ndarray,
         save_path = Path(save_dir) / 'inlet_profiles.png'
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         logging.debug(f"Plot saved to: {save_path}")
-    
-# Example usage
-if __name__ == "__main__":
-    import argparse
-    from config import ABLConfig
 
-    parser = argparse.ArgumentParser(description="Generate ABL boundary conditions for an OpenFOAM case.")
-    parser.add_argument("case_dir", help="Path to the OpenFOAM case directory")
-    parser.add_argument(
-        "--plot",
-        dest="plot_profiles",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Generate inlet profile plots (default: enabled). Use --no-plot to disable.",
-    )
-    parser.add_argument(
-        "--verbose",
-        dest="verbose",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="Enable verbose logging (default: disabled). Use --verbose to enable.",
-    )
-    args = parser.parse_args()
-
-    config = ABLConfig()
-
-    # Example: specify wind speed and reference height
-    # u_star will be derived from U_ref, z_ref, and z0_eff_atInlet in the inlet file
-    # config = ABLConfig(atmospheric=AtmosphericConfig(U_ref=8.0, z_ref=100.0, wind_dir_met=225.0))
-
-    # Generate using cell face centers (default); pass --no-use-face-centers for internal faces
-    results = generate_inlet_data_workflow(
-        args.case_dir,
-        config,
-        plot_profiles=args.plot_profiles,
-        verbose=args.verbose
-    )

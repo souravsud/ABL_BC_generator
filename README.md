@@ -8,10 +8,19 @@ Profiles are based on the Richards & Hoxey (1993) log-law with optional boundary
 
 ## Requirements
 
-Install the Python dependencies with:
+Install the package (and all Python dependencies) directly from the repository:
 
 ```bash
-pip install -r requirements.txt
+pip install .
+```
+
+This makes the `abl_bc_generator` Python package importable from anywhere.
+
+For a development / editable install (changes to the source are reflected
+immediately without reinstalling):
+
+```bash
+pip install -e .
 ```
 
 ---
@@ -36,33 +45,11 @@ This is tool was intended to be used with the terrain following mesh tool [terra
 
 ## Usage
 
-### Basic call (all defaults)
-
-```bash
-python generateBCs.py /path/to/my/openfoam/case
-```
-
-This uses default atmospheric conditions (`u_star = 0.25 m/s`, `wind_dir_met = 225°`, `h_bl = 1500 m`) and writes all boundary condition files into `<case_dir>/0/`.
-
-### Disable profile plot
-
-```bash
-python generateBCs.py /path/to/case --no-plot
-```
-
-### Enable verbose logging
-
-```bash
-python generateBCs.py /path/to/case --verbose
-```
-
-### Python API — custom configuration
-
-You can import and call the workflow directly from your own script to customise every parameter:
+After `pip install .` you can import directly from the `abl_bc_generator` package:
 
 ```python
-from generateBCs import generate_inlet_data_workflow
-from config import ABLConfig, AtmosphericConfig, TurbulenceConfig, MeshConfig
+from abl_bc_generator import generate_inlet_data_workflow
+from abl_bc_generator import ABLConfig, AtmosphericConfig, TurbulenceConfig, MeshConfig
 
 # Example 1 -- specify u_star directly
 config = ABLConfig(
@@ -131,7 +118,7 @@ results = generate_inlet_data_workflow("/path/to/case", config)
 Patch names default to `inlet`, `outlet`, `ground`, `sky`, `sides`. Override any name:
 
 ```python
-from config import MeshConfig
+from abl_bc_generator import MeshConfig
 mesh = MeshConfig(patch_names={
     'inlet':  'inletPatch',
     'outlet': 'outletPatch',
@@ -161,7 +148,7 @@ After a successful run the following files are written inside your case director
         └── initialConditions
 ```
 
-An optional plot (`inlet_profiles.png`) is also saved in `<case_dir>/` when `--plot` is active (the default).
+An optional plot (`inlet_profiles.png`) is also saved in `<case_dir>/` when `plot_profiles=True` (the default).
 
 ---
 
