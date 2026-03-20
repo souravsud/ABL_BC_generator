@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-abl-bc-generator = "abl_bc_generator.generate:_cli"
+abl-bc-generator = "abl_bc_generator.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
