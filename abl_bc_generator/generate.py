@@ -638,7 +638,7 @@ def write_initial_conditions_file(case_dir: str, config: ABLConfig, initial_vals
     templates_dir = Path(__file__).parent / 'BCtemplates'
     env = Environment(loader=FileSystemLoader(str(templates_dir)), keep_trailing_newline=True)
 
-    content = env.get_template('initialConditions').render(
+    content = env.get_template('include/initialConditions').render(
         foam_version=config.openfoam.foam_version,
         flow_velocity=initial_vals['flowVelocity'],
         pressure=initial_vals['pressure'],
