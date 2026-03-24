@@ -166,27 +166,29 @@ def write_openfoam_data_files(case_dir: str, U_profiles: np.ndarray, k_profiles:
     """Write boundary condition data files for OpenFOAM"""
     constant_dir = Path(case_dir) / '0' / 'include'
     constant_dir.mkdir(exist_ok=True)
+
+    closer = ")\n\n// ************************************************************************* //\n"
     
     # Write velocity data
     with open(constant_dir / 'inletU', 'w') as f:
         f.write(f"{len(U_profiles)}\n(\n")
         for u_vec in U_profiles:
             f.write(f"({u_vec[0]:.6f} {u_vec[1]:.6f} {u_vec[2]:.6f})\n")
-        f.write(")\n\n// ************************************************************************* //\n")
+        f.write(closer)
     
     # Write k data
     with open(constant_dir / 'inletK', 'w') as f:
         f.write(f"{len(k_profiles)}\n(\n")
         for k_val in k_profiles:
             f.write(f"{k_val:.8f}\n")
-        f.write(")\n\n// ************************************************************************* //\n")
+        f.write(closer)
     
     # Write epsilon data  
     with open(constant_dir / 'inletEpsilon', 'w') as f:
         f.write(f"{len(epsilon_profiles)}\n(\n")
         for eps_val in epsilon_profiles:
             f.write(f"{eps_val:.10f}\n")
-        f.write(")\n\n// ************************************************************************* //\n")
+        f.write(closer)
 
 
 def generate_boundary_condition_files(case_dir: str, config: ABLConfig, initial_vals):
