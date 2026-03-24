@@ -195,7 +195,7 @@ def generate_boundary_condition_files(case_dir: str, config: ABLConfig, initial_
     zero_dir.mkdir(exist_ok=True)
 
     # Set up Jinja2 template environment
-    templates_dir = Path(__file__).parent / 'BCtemplates'
+    templates_dir = Path(template_dir) if template_dir else Path(__file__).parent / 'BCtemplates'
     env = Environment(loader=FileSystemLoader(str(templates_dir)), keep_trailing_newline=True)
 
     patches = config.mesh.patch_names
@@ -235,7 +235,7 @@ def generate_boundary_condition_files(case_dir: str, config: ABLConfig, initial_
 
 
 def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None, 
-                               use_face_centers: bool = True, plot_profiles: bool = True, verbose: bool = False):
+                               use_face_centers: bool = True, plot_profiles: bool = True, verbose: bool = False, template_dir=None):
     """
     Complete workflow for mesh-based ABL inlet data generation
     Now reads mesh parameters from inlet face file instead of config
@@ -289,10 +289,10 @@ def generate_inlet_data_workflow(case_dir: str, config: ABLConfig = None,
     write_openfoam_data_files(case_dir, U_profiles, k_profiles, epsilon_profiles, config)
     
     # Generate boundary condition files
-    generate_boundary_condition_files(case_dir, config, initial_vals)
+    generate_boundary_condition_files(case_dir, config, initial_vals,  template_dir=template_dir)
     
     # Generate initial conditions file
-    write_initial_conditions_file(case_dir, config, initial_vals)
+    write_initial_conditions_file(case_dir, config, initial_vals,  template_dir=template_dir)
     
     # Optional plotting
     if plot_profiles:
@@ -630,12 +630,12 @@ def calculate_initial_conditions(config: ABLConfig, z0_mean: Optional[float] = N
         'z0_used': z0_value  # Store for reference
     }
 
-def write_initial_conditions_file(case_dir: str, config: ABLConfig, initial_vals):
+def write_initial_conditions_file(case_dir: str, config: ABLConfig, initial_vals, template_dir=None):
     """Write initialConditions file based on inlet profile equations"""
     include_dir = Path(case_dir) / '0' / 'include'
     include_dir.mkdir(parents=True, exist_ok=True)
 
-    templates_dir = Path(__file__).parent / 'BCtemplates'
+    templates_dir = Path(template_dir) if template_dir else Path(__file__).parent / 'BCtemplates'
     env = Environment(loader=FileSystemLoader(str(templates_dir)), keep_trailing_newline=True)
 
     content = env.get_template('include/initialConditions').render(
