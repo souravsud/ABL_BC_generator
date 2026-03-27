@@ -9,48 +9,47 @@ FoamFile
 {
     version     {{ version }};
     format      ascii;
-    class       volVectorField;
-    object      U;
+    class       volScalarField;
+    object      p;
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-dimensions      [0 1 -1 0 0 0 0];
+#include        "include/initialConditions"
 
-internalField   uniform ({{ "%.3f" | format(flow_velocity[0]) }} {{ "%.3f" | format(flow_velocity[1]) }} {{ "%.3f" | format(flow_velocity[2]) }});
+dimensions      [0 2 -2 0 0 0 0];
+
+internalField   uniform $pressure;
 
 boundaryField
 {
     {{ patches.inlet }}
     {
-        type            fixedValue;
-        value           nonuniform
-        #include        "include/inletU"
-        ;
+        type            {{ bc_p.inlet.type }};
     }
-    
+
     {{ patches.outlet }}
     {
-        type            {{ bc_U.outlet.type }};
-        {% if bc_U.outlet.value %}
-        value           {{ bc_U.outlet.value }};
+        type            {{ bc_p.outlet.type }};
+        {% if bc_p.outlet.value is defined and bc_p.outlet.value %}
+        value           {{ bc_p.outlet.value }};
         {% endif %}
     }
-    
+
     {{ patches.ground }}
     {
-        type             {{ bc_U.ground.type }};
+        type            {{ bc_p.ground.type }};
     }
-    
+
     {{ patches.sky }}
     {
-        type             {{ bc_U.sky.type }};
+        type            {{ bc_p.sky.type }};
     }
-    
+
     {{ patches.sides }}
     {
-        type             {{ bc_U.sides.type }};
+        type            {{ bc_p.sides.type }};
     }
-    
+
     "proc.*"
     {
         type            processor;

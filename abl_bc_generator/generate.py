@@ -221,12 +221,14 @@ def generate_boundary_condition_files(case_dir: str, config: ABLConfig, initial_
         'bc_epsilon': bc['epsilon'],
         'bc_nut': bc['nut'],
         'flow_velocity': initial_vals['flowVelocity'],
+        'bc_p': bc.get('p', {}),
+        'pressure': initial_vals.get('pressure', 0.0),
         'turbulent_ke': initial_vals['turbulentKE'],
         'turbulent_epsilon': initial_vals['turbulentEpsilon'],
     }
 
     # Render and write each boundary condition file
-    for name in ('U', 'k', 'epsilon', 'nut'):
+    for name in ('U', 'k', 'epsilon', 'nut', 'p'):
         content = env.get_template(name).render(**common_ctx)
         with open(zero_dir / name, 'w') as f:
             f.write(content)

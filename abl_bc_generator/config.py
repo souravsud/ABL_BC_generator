@@ -79,6 +79,13 @@ class OpenFOAMConfig:
                 },
                 'nut': {
                     'sky': {'type': 'slip'},
+                },
+                'p': {
+                    'inlet': {'type': 'zeroGradient'},
+                    'outlet': {'type': 'fixedValue', 'value': 'uniform 0'},
+                    'ground': {'type': 'zeroGradient'},
+                    'sky': {'type': 'zeroGradient'},
+                    'sides': {'type': 'zeroGradient'},
                 }
             }
 
