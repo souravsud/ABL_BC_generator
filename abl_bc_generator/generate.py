@@ -191,7 +191,7 @@ def write_openfoam_data_files(case_dir: str, U_profiles: np.ndarray, k_profiles:
         f.write(closer)
 
 
-def generate_boundary_condition_files(case_dir: str, config: ABLConfig, initial_vals):
+def generate_boundary_condition_files(case_dir: str, config: ABLConfig, initial_vals, template_dir=None):
     """Generate boundary condition files that read from data files"""
     zero_dir = Path(case_dir) / '0'
     zero_dir.mkdir(exist_ok=True)
