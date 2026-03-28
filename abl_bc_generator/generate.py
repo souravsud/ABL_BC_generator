@@ -89,13 +89,11 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_c
     k_profiles = np.zeros(total_faces)
     epsilon_profiles = np.zeros(total_faces)
     
-    # Flow direction: convert meteorological convention to Cartesian
-    # Met convention: 0=FROM north, 90=FROM east, 180=FROM south, 270=FROM west
-    # Cartesian: angle from +x axis (east)
-    flow_dir_cartesian_deg = (270.0 - atm.wind_dir_met) % 360.0
-    flow_dir_rad = np.radians(flow_dir_cartesian_deg)
-    flow_dir_x = np.cos(flow_dir_rad)
-    flow_dir_y = np.sin(flow_dir_rad)
+    # The domain is aligned to the wind direction (the mesh +x axis IS the flow direction).
+    # The inlet face normal is therefore (1, 0, 0) in domain coordinates and the inlet
+    # velocity is always oriented along +x.  Applying a geographic rotation here would
+    # produce a velocity that is NOT normal to the inlet face, causing the observed
+    # directional discrepancy.
 
     # Determine a single effective z0 for the inlet profiles.
     # Using per-block z0 in the log-law would produce different velocity magnitudes
@@ -130,7 +128,7 @@ def calculate_inlet_profiles_from_mesh(config: ABLConfig, inlet_data, use_face_c
             else:
                 u_mag = (atm.u_star / turb.kappa) * np.log(1.0 + atm.h_bl / profile_z0)
                 
-            U_profiles[face_idx] = [u_mag * flow_dir_x, u_mag * flow_dir_y, 0.0]
+            U_profiles[face_idx] = [u_mag, 0.0, 0.0]
             
             # TKE profile (does not depend on z0)
             if atm.h_bl < 1e-9:
@@ -592,15 +590,9 @@ def calculate_initial_conditions(config: ABLConfig, z0_mean: Optional[float] = N
     u_mag = (atm.u_star / turb.kappa) * np.log(1.0 + ref_height / z0_value)
     u_mag_scaled = u_mag * vel_scaling
     
-    # Flow direction: convert meteorological convention to Cartesian
-    # Met convention: 0=FROM north, 90=FROM east, 180=FROM south, 270=FROM west
-    # Cartesian: angle from +x axis (east)
-    flow_dir_cartesian_deg = (270.0 - atm.wind_dir_met) % 360.0
-    flow_dir_rad = np.radians(flow_dir_cartesian_deg)
-    flow_dir_x = np.cos(flow_dir_rad)
-    flow_dir_y = np.sin(flow_dir_rad)
-
-    flow_velocity = (u_mag_scaled * flow_dir_x, u_mag_scaled * flow_dir_y, 0.0)
+    # The domain is aligned to the wind direction, so the initial flow velocity is
+    # along +x in domain coordinates (the mesh +x axis IS the flow direction).
+    flow_velocity = (u_mag_scaled, 0.0, 0.0)
     
     # Calculate k at reference height
     if atm.h_bl < 1e-9:
