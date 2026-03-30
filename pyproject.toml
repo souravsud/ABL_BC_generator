@@ -20,4 +20,4 @@ where = ["."]
 include = ["abl_bc_generator*"]
 
 [tool.setuptools.package-data]
-abl_bc_generator = ["BCtemplates/*"]
+abl_bc_generator = ["BCtemplates/*", "BCtemplates/**/*"]
