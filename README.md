@@ -43,7 +43,47 @@ This is tool was intended to be used with the terrain following mesh tool [terra
 
 ---
 
-## Usage
+## Standalone usage (no install required)
+
+If you just want to run the tool without importing it as a Python package, use
+the provided `run.py` script together with `config.yaml`.
+
+**1. Install the Python dependencies**
+
+```bash
+pip install -r requirements.txt   # adds pyyaml on top of the existing deps
+```
+
+**2. Edit `config.yaml`**
+
+Open `config.yaml` and set at least `case_dir` (or pass it on the command
+line).  Every other value has a sensible default.
+
+```yaml
+case_dir: /path/to/your/openfoam/case
+
+atmospheric:
+  u_star: 0.35
+  wind_dir_met: 270.0   # wind FROM west
+  h_bl: 1200.0
+```
+
+**3. Run**
+
+```bash
+# uses config.yaml in the same directory
+python run.py
+
+# explicit config path
+python run.py --config /path/to/config.yaml
+
+# override the case directory on the command line
+python run.py --config config.yaml --case /path/to/openfoam/case
+```
+
+---
+
+## Package usage
 
 After `pip install .` you can import directly from the `abl_bc_generator` package:
 

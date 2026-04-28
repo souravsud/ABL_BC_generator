@@ -1,0 +1,49 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# ABL BC Generator – sample configuration
+# ──────────────────────────────────────────────────────────────────────────────
+# Copy this file next to run.py (or anywhere you like) and edit the values
+# before running:
+#
+#   python run.py --config config.yaml --case /path/to/your/openfoam/case
+#
+# All sections and keys are optional – defaults are shown in comments.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Path to your OpenFOAM case directory.
+# Can be overridden on the command line: --case /path/to/case
+case_dir: /path/to/your/openfoam/case
+
+# Whether to save an inlet_profiles.png plot inside the case directory.
+plot_profiles: true
+
+# Whether to print detailed progress messages.
+verbose: false
+
+# ── Atmospheric parameters ────────────────────────────────────────────────────
+atmospheric:
+  # Option A – specify friction velocity directly
+  u_star: 0.35           # friction velocity (m/s)
+
+  # Option B – derive u_star from a reference wind speed (comment out u_star
+  # above and uncomment the two lines below)
+  # U_ref: 8.0           # reference wind speed (m/s)
+  # z_ref: 100.0         # height of the reference wind speed (m)
+
+  z0: 0.0                # surface roughness (m); 0 → use roughness map from inletFaceInfo.txt
+  h_bl: 1200.0           # boundary-layer height (m); 0 → untruncated Richards & Hoxey log-law
+  wind_dir_met: 270.0    # meteorological wind direction (degrees FROM): 0=N, 90=E, 180=S, 270=W
+
+# ── Turbulence parameters ─────────────────────────────────────────────────────
+turbulence:
+  Cmu: 0.033             # turbulence model constant
+  kappa: 0.40            # Von Kármán constant
+
+# ── Patch names ───────────────────────────────────────────────────────────────
+# Change these only if your mesh uses non-default boundary patch names.
+mesh:
+  patch_names:
+    inlet:   inlet
+    outlet:  outlet
+    ground:  ground
+    sky:     sky
+    sides:   sides
